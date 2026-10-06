@@ -2624,10 +2624,10 @@ struct AnswerHoop: View {
         static let canvas: CGFloat = 1254
         /// Cap travel into the housing, in canvas pixels.
         static let pressTravel: CGFloat = 88
-        /// Optical centre of the red top face. The authored canvas is drawn in
-        /// perspective, so the face sits a little above mid-frame — enough for
-        /// a digit to read as centred on the button, without floating high.
-        static let labelCenterY: CGFloat = 0.435
+        /// Optical centre of the red top face on the perspective canvas. Matches
+        /// the Nuts & Numbers grab label seam so a digit reads as sitting in
+        /// the middle of the button, not low in the housing.
+        static let labelCenterY: CGFloat = 470 / 1254
     }
 
     private var travel: CGFloat { size * (Art.pressTravel / Art.canvas) }
@@ -2686,7 +2686,9 @@ struct AnswerHoop: View {
                     .minimumScaleFactor(0.32)
                     .allowsTightening(true)
                     .multilineTextAlignment(.center)
-                    .frame(width: size * 0.56, height: size * 0.34)
+                    .frame(width: size * 0.56, height: size * 0.34, alignment: .center)
+                    // Sit on the red top-face centre (perspective art), not the
+                    // square canvas mid-point — that mid-point reads too low.
                     .offset(y: faceOffset)
                 if feedback == .bonus {
                     BonusStarBurst(size: size * 0.85)
