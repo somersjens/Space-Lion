@@ -46,6 +46,9 @@ final class GameViewModel: ObservableObject {
     /// Never during a guided run: the life lesson is about losing a heart, and
     /// a rescue heart in the same flight would teach the opposite thing.
     @Published private(set) var isRescueHeartDue = false
+    /// Space Lion gives every target ten seconds. The clock is paused by the
+    /// existing pause card and whenever the app leaves the foreground.
+    @Published private(set) var timeRemaining: Int
 
     /// Invalidates pending timed work when a round is superseded (restart, or
     /// leaving the screen), so a late callback can never touch a newer round.
@@ -55,6 +58,10 @@ final class GameViewModel: ObservableObject {
     /// A round-resolution callback that became due while the pause card was
     /// covering the reef. It runs once on continue instead of behind the card.
     private var pendingScheduledWork: (() -> Void)?
+    private var clockSubscription: AnyCancellable?
+    private var clockDeadline: Date?
+    private var clockStoredSeconds: TimeInterval
+    private var sceneIsActive = true
     private var lastCorrectCatchTime: TimeInterval?
     /// The guided run's state machine. It is asked what to show and which rules
     /// the step being taught bends; it never touches the engine itself.
@@ -76,6 +83,9 @@ final class GameViewModel: ObservableObject {
         self.engine = MemoryGame(level: request.level,
                             mixedVariant: request.mixedVariant,
                             mode: request.mode)
+        let duration = request.board.maximum * 10
+        self.timeRemaining = duration
+        self.clockStoredSeconds = TimeInterval(duration)
         // Not seeded from the request: the welcome flow only pre-arms the start
         // card's switch, and the player is free to turn it off there. What the
         // card was showing when Start was pressed is what counts, and that
@@ -167,12 +177,16 @@ final class GameViewModel: ObservableObject {
             engine.resume(from: paused)
             hasBonusFishPower = paused.hasBonusFishPower ?? false
             lastMissedChallenge = paused.lastMissedChallenge
+            let restored = paused.timeRemainingSeconds ?? request.board.maximum * 10
+            timeRemaining = restored
+            clockStoredSeconds = TimeInterval(restored)
         } else {
             engine.start()
         }
         openRound()
         announceRound()
         sync()
+        startClockIfPossible()
     }
 
     /// Opens a round for play. Under water there is nothing to memorise: the
@@ -197,6 +211,7 @@ final class GameViewModel: ObservableObject {
         generation &+= 1
         pendingScheduledWork = nil
         lastCorrectCatchTime = nil
+        stopClock(rememberingRemaining: true)
     }
 
     /// Temporarily stops an active run without ending it. The snapshot also
@@ -209,6 +224,7 @@ final class GameViewModel: ObservableObject {
         PlaytimeTracker.shared.challengeEnded()
         AppAudio.shared.setGameplayActive(false)
         lastCorrectCatchTime = nil
+        stopClock(rememberingRemaining: true)
     }
 
     /// Continues the in-memory run after its pause card. No round is rebuilt,
@@ -219,6 +235,7 @@ final class GameViewModel: ObservableObject {
         PlaytimeTracker.shared.challengeStarted()
         AppAudio.shared.setGameplayActive(true)
         sync()
+        startClockIfPossible()
         let work = pendingScheduledWork
         pendingScheduledWork = nil
         work?()
@@ -243,7 +260,8 @@ final class GameViewModel: ObservableObject {
         guard !hasRecordedResult,
               let paused = engine.pausedSession(
                 hasBonusFishPower: hasBonusFishPower,
-                lastMissedChallenge: lastMissedChallenge
+                lastMissedChallenge: lastMissedChallenge,
+                timeRemainingSeconds: currentClockSeconds
               )
         else { return }
         guard paused.cards > 0 else {
@@ -271,10 +289,14 @@ final class GameViewModel: ObservableObject {
         lastMissedChallenge = nil
         comboAnnouncementID = 0
         lastCorrectCatchTime = nil
+        stopClock(rememberingRemaining: false)
+        timeRemaining = request.board.maximum * 10
+        clockStoredSeconds = TimeInterval(timeRemaining)
         AppAudio.shared.playSessionStart()
         openRound()
         announceRound()
         sync()
+        startClockIfPossible()
     }
 
     // MARK: - Round flow
@@ -349,7 +371,11 @@ final class GameViewModel: ObservableObject {
             guard let self else { return }
             guard self.engine.finishResolving() else { return }
             let previousRoundID = self.engine.round?.id
-            self.engine.advance()
+            if case .wrong? = self.engine.lastOutcome {
+                if self.engine.retryCurrentRound() { self.openRound() }
+            } else {
+                self.engine.advance()
+            }
             if self.engine.state == .gameOver {
                 self.finishSession(playsFanfare: announcesNextRound)
             } else if self.engine.round?.id != previousRoundID {
@@ -416,7 +442,58 @@ final class GameViewModel: ObservableObject {
         // The board filling up, or the lives running out, ends the lesson with
         // the session it was being taught in.
         director.cancel()
+        stopClock(rememberingRemaining: false)
         recordResultIfNeeded(playsFanfare: playsFanfare)
+    }
+
+    // MARK: - Level clock
+
+    /// Keeps background time out of the level clock without changing the
+    /// existing pause/navigation flow.
+    func setSceneActive(_ active: Bool) {
+        sceneIsActive = active
+        if active { startClockIfPossible() }
+        else { stopClock(rememberingRemaining: true) }
+    }
+
+    private var currentClockSeconds: Int {
+        if let deadline = clockDeadline {
+            return max(0, Int(ceil(deadline.timeIntervalSinceNow)))
+        }
+        return max(0, Int(ceil(clockStoredSeconds)))
+    }
+
+    private func startClockIfPossible() {
+        guard clockSubscription == nil, sceneIsActive, !isPaused,
+              engine.state != .intro, engine.state != .gameOver,
+              clockStoredSeconds > 0 else { return }
+        clockDeadline = Date().addingTimeInterval(clockStoredSeconds)
+        clockSubscription = Timer.publish(every: 0.25,
+                                          tolerance: 0.04,
+                                          on: .main,
+                                          in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in self?.updateClock() }
+        updateClock()
+    }
+
+    private func stopClock(rememberingRemaining: Bool) {
+        if rememberingRemaining { clockStoredSeconds = TimeInterval(currentClockSeconds) }
+        clockSubscription?.cancel()
+        clockSubscription = nil
+        clockDeadline = nil
+    }
+
+    private func updateClock() {
+        let remaining = currentClockSeconds
+        set(\.timeRemaining, remaining)
+        guard remaining == 0 else { return }
+        stopClock(rememberingRemaining: false)
+        generation &+= 1
+        pendingScheduledWork = nil
+        engine.expireTime()
+        finishSession(playsFanfare: true)
+        sync()
     }
 
     /// Writes the session to disk exactly once, whichever way the screen is

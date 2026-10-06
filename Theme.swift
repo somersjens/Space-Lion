@@ -181,15 +181,15 @@ enum CharacterCatalog {
     static let freeCharacterID = CharacterUnlocks.starterCharacterID
 
     /// The localized fallback used when the player leaves their name empty.
-    /// The current game character is Penguin, so this resolves to Penguin and
-    /// automatically follows every language added to the string catalog.
+    /// The starter follows the configured character order, so changing the
+    /// first playable character never leaves the welcome name behind.
     static var defaultPlayerName: String {
-        character(id: "flying_penguin").localizedName
+        character(id: CharacterUnlocks.starterCharacterID).localizedName
     }
 
     /// Order must match `CharacterUnlocks.orderedCharacterIDs`. Each palette is
-    /// taken from its portrait artwork, and each portrait is numbered by that
-    /// same catalog position, so `4_main_character` is the lion everywhere.
+    /// taken from its portrait artwork. Asset names remain attached to their
+    /// animals even when the playable catalog order changes.
     static let all: [AnimalCharacter] = [
         AnimalCharacter(id: "flying_penguin", name: "Penguin", emoji: "🐧",
                         imageName: "1_main_character", thumbnailName: "1_thumb",

@@ -15,19 +15,11 @@ public enum GameConfig {
 
     // MARK: Answers
 
-    /// How many answer bubbles a question offers. One fixed number for every
-    /// topic and every combination: the reef releases the same five answers,
-    /// over and over, for as long as the sum stands. It used to be a choice
-    /// between two, three and four, which made every level three separate
-    /// scoreboards aiming at three different targets — see `migrateToFixed
-    /// AnswerCount` for how those were merged back into one.
-    public static let answerBubbleCount = 3
+    /// Space Lion keeps eight unique answers visible around the screen.
+    public static let answerBubbleCount = 8
 
-    /// Wrong answers a question must supply: every bubble but the right one.
-    /// Flying Penguin shows three hoops. A fourth, hidden distractor is built
-    /// so a no-correct-answer flight can still show three credible wrong
-    /// answers without inventing values outside the question generator.
-    public static var distractorCount: Int { answerBubbleCount }
+    /// Wrong answers a question must supply: every button but the right one.
+    public static var distractorCount: Int { answerBubbleCount - 1 }
 
     // MARK: Lives
 
@@ -143,10 +135,10 @@ public enum GameConfig {
     /// The second half of the catalog is Premium-exclusive: `nil` means the
     /// character cannot be earned with cards at all, no matter the total.
     public static let characterUnlockRequirements: [Int?] = [
-        0,          // Flying Penguin — new starter
-        500,        // bunny
-        1_500,      // dog
-        3_000,      // lion
+        0,          // lion — Space Lion starter
+        500,        // flying penguin
+        1_500,      // bunny
+        3_000,      // dog
         5_000,      // octopus
         nil, nil, nil, nil, nil   // crab, elephant, bear, fox, frog — Premium
     ]

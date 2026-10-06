@@ -34,6 +34,8 @@ public struct PausedSession: Codable, Equatable, Sendable {
     public let isHeartFishAvailable: Bool?
     /// Optional so older stored runs resume without a remembered mistake.
     public let lastMissedChallenge: String?
+    /// Optional for compatibility with runs saved before Space Lion's clock.
+    public let timeRemainingSeconds: Int?
 
     public init(boardID: String,
                 roundNumber: Int,
@@ -48,7 +50,8 @@ public struct PausedSession: Codable, Equatable, Sendable {
                 heartFishProgress: Int? = nil,
                 heartFishTarget: Int? = nil,
                 isHeartFishAvailable: Bool? = nil,
-                lastMissedChallenge: String? = nil) {
+                lastMissedChallenge: String? = nil,
+                timeRemainingSeconds: Int? = nil) {
         self.boardID = boardID
         self.roundNumber = roundNumber
         self.cards = cards
@@ -63,6 +66,7 @@ public struct PausedSession: Codable, Equatable, Sendable {
         self.heartFishTarget = heartFishTarget
         self.isHeartFishAvailable = isHeartFishAvailable
         self.lastMissedChallenge = lastMissedChallenge
+        self.timeRemainingSeconds = timeRemainingSeconds
     }
 
     /// A record is only usable if it describes a session that can still be
@@ -77,6 +81,7 @@ public struct PausedSession: Codable, Equatable, Sendable {
             && wrongAnswers >= 0
             && (heartFishProgress ?? 0) >= 0
             && (heartFishTarget ?? GameConfig.heartFishCorrectAnswers) >= 1
+            && (timeRemainingSeconds ?? 1) > 0
     }
 }
 

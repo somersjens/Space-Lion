@@ -710,7 +710,7 @@ public final class QuestionGenerator {
         // Pad with the closest unused offsets, so even a tiny answer like 0
         // still yields four distinct, plausible neighbours.
         var offset = 1
-        while distractors.count < 6 && offset < 40 {
+        while distractors.count < 12 && offset < 40 {
             for candidate in [answer + offset, answer - offset] where candidate >= 0 {
                 if !seen.contains(candidate) {
                     seen.insert(candidate)
@@ -743,7 +743,7 @@ public final class QuestionGenerator {
         // Pad with neighbouring tenths, so a padded card is the same kind of
         // number as the real answer rather than an obvious outsider.
         var offset = 10
-        while distractors.count < 6 && offset <= 200 {
+        while distractors.count < 12 && offset <= 400 {
             for candidate in [answer + offset, answer - offset] where candidate > 0 {
                 if !seen.contains(candidate) {
                     seen.insert(candidate)
@@ -778,13 +778,46 @@ public final class QuestionGenerator {
         // Pad so even a tiny denominator (thirds) can fill a four-card round.
         // Fractions get neighbouring parts and neighbouring denominators;
         // percentages get nearby percentages. Both stay plausible.
-        if distractors.count < 4 {
+        if distractors.count < 8 {
             for candidate in Self.padding(for: answer) {
-                guard distractors.count < 6 else { break }
+                guard distractors.count < 12 else { break }
                 let value = AnswerValue(candidate)
                 guard value != correct, !seen.contains(value) else { continue }
                 seen.insert(value)
                 distractors.append(candidate)
+            }
+        }
+        // Eight visible Space Lion buttons need seven genuinely different
+        // alternatives even at boundary values such as 100% or 1/2.
+        if distractors.count < 12, answer.hasSuffix("%"),
+           let percentage = Int(answer.dropLast()) {
+            for delta in 1...100 {
+                for number in [percentage - delta, percentage + delta]
+                    where number >= 0 && number <= 100 {
+                    guard distractors.count < 12 else { break }
+                    let candidate = "\(number)%"
+                    let value = AnswerValue(candidate)
+                    guard value != correct, !seen.contains(value) else { continue }
+                    seen.insert(value)
+                    distractors.append(candidate)
+                }
+                if distractors.count >= 12 { break }
+            }
+        }
+        if distractors.count < 12, answer.contains("/") {
+            let parts = answer.split(separator: "/", maxSplits: 1).compactMap { Int($0) }
+            if parts.count == 2, parts[1] > 0 {
+                for denominator in 2...(parts[1] + 12) {
+                    for numerator in 1..<denominator {
+                        guard distractors.count < 12 else { break }
+                        let candidate = "\(numerator)/\(denominator)"
+                        let value = AnswerValue(candidate)
+                        guard value != correct, !seen.contains(value) else { continue }
+                        seen.insert(value)
+                        distractors.append(candidate)
+                    }
+                    if distractors.count >= 12 { break }
+                }
             }
         }
         return MathQuestion(prompt: prompt,
@@ -799,7 +832,9 @@ public final class QuestionGenerator {
     private static func padding(for answer: String) -> [String] {
         if answer.hasSuffix("%") {
             guard let value = Int(answer.dropLast()) else { return [] }
-            return [value + 5, value - 5, value + 10, value - 10, value + 25, value * 2]
+            return [value + 5, value - 5, value + 10, value - 10,
+                    value + 15, value - 15, value + 20, value - 20,
+                    value + 25, value - 25, value + 50, value / 2, value * 2]
                 .filter { $0 > 0 && $0 <= 100 && $0 != value }
                 .map { "\($0)%" }
         }

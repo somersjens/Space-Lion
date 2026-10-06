@@ -63,6 +63,7 @@ struct ResultView: View {
         switch result.reason {
         case .outOfLives:      return "game.end.gameOverTitle"
         case .roundsCompleted: return "result.complete"
+        case .timeExpired:     return "game.end.gameOverTitle"
         case .quit:            return "result.stopped"
         }
     }

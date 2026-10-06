@@ -34,13 +34,14 @@ public enum GameState: String, Equatable, Sendable {
     case resolving
     /// Feedback finished; the next round can be installed.
     case roundComplete
-    /// Out of lives, or the round limit was reached.
+    /// The target, life limit or level clock ended the run.
     case gameOver
 }
 
 public enum GameOverReason: String, Equatable, Sendable {
     case outOfLives
     case roundsCompleted
+    case timeExpired
     case quit
 }
 
@@ -151,12 +152,9 @@ public final class MemoryGame {
         Double(lifeHalves) / Double(GameConfig.lifeGranularity)
     }
 
-    /// The target plus enough prepared replacements for every survivable
-    /// half-heart miss. Wrong passages now move on instead of repeating, while
-    /// the board must remain completable for as long as the player has a life.
-    public var maximumRounds: Int {
-        board.maximum + GameConfig.startingLifeHalves - 1
-    }
+    /// One prepared question per required correct answer. Wrong choices reopen
+    /// the active round and therefore consume no question from this runway.
+    public var maximumRounds: Int { board.maximum }
 
     /// Whether a tap on an answer card can be accepted right now.
     public var acceptsInput: Bool { state == .answering }
@@ -246,7 +244,8 @@ public final class MemoryGame {
     /// A snapshot of the session as it stands, for storing when the player
     /// leaves. Nil once the session is over — there is nothing to come back to.
     public func pausedSession(hasBonusFishPower: Bool = false,
-                              lastMissedChallenge: String? = nil) -> PausedSession? {
+                              lastMissedChallenge: String? = nil,
+                              timeRemainingSeconds: Int? = nil) -> PausedSession? {
         guard state != .intro, state != .gameOver else { return nil }
         return PausedSession(boardID: board.storageID,
                              roundNumber: roundNumber,
@@ -262,7 +261,8 @@ public final class MemoryGame {
                              heartFishProgress: heartFishProgress,
                              heartFishTarget: heartFishTarget,
                              isHeartFishAvailable: isHeartFishAvailable,
-                             lastMissedChallenge: lastMissedChallenge)
+                             lastMissedChallenge: lastMissedChallenge,
+                             timeRemainingSeconds: timeRemainingSeconds)
     }
 
     /// The tap that turns the answer cards face down and brings the question
@@ -392,8 +392,24 @@ public final class MemoryGame {
         return true
     }
 
-    /// Installs the next round or ends the session. Every flown passage consumes
-    /// its question, whether the selected answer was right or wrong.
+    /// Reopens the active question after a wrong answer. Its option identities
+    /// and values stay untouched, so the player can try the same sum again.
+    @discardableResult
+    public func retryCurrentRound() -> Bool {
+        guard state == .roundComplete, lifeHalves > 0, round != nil else { return false }
+        selectedOptionID = nil
+        lastOutcome = nil
+        state = .memorising
+        return true
+    }
+
+    /// Ends an active run when Space Lion's level clock reaches zero.
+    public func expireTime() {
+        guard state != .intro, state != .gameOver else { return }
+        finish(reason: .timeExpired)
+    }
+
+    /// Installs the next round or ends the session after a correct answer.
     @discardableResult
     public func advance() -> GameState {
         guard state == .roundComplete else { return state }

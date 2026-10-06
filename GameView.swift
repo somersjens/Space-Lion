@@ -154,6 +154,7 @@ struct GameView: View {
         .animation(.easeInOut(duration: 0.25), value: showsIntro)
         .onAppear {
             screenInsets = ScreenSafeArea.current
+            model.setSceneActive(scenePhase == .active)
             // Let the start card reach the screen first, then use the covered
             // playfield to prepare every sum and the first visible glyphs.
             DispatchQueue.main.async { model.prepare() }
@@ -171,6 +172,9 @@ struct GameView: View {
             }
         }
         .onDisappear { model.end() }
+        .onChange(of: scenePhase) { _, phase in
+            model.setSceneActive(phase == .active)
+        }
     }
 
     private func startSession() {
@@ -209,7 +213,7 @@ struct GameView: View {
 
         return GeometryReader { proxy in
             ZStack(alignment: .top) {
-                FlyingPenguinPlayfield(rounds: model.visibleRounds,
+                SpaceLionPlayfield(rounds: model.visibleRounds,
                               maximumRounds: model.maximumRounds,
                               character: character,
                               isPad: isPad,
@@ -239,7 +243,7 @@ struct GameView: View {
                               onHit: { optionID, usesSpeedBonus, usesHalfLifePenalty in
                                   model.select(optionID: optionID,
                                                usesSpeedBonus: usesSpeedBonus,
-                                               wrongAnswerCostHalves: usesHalfLifePenalty ? 1 : nil)
+                                               wrongAnswerCostHalves: 0)
                               },
                               onSwallow: { model.reportCatchOutcome(isCorrect: $0) },
                               onDive: { model.reportDiveOutcome() },
@@ -456,6 +460,7 @@ struct GameView: View {
                             .offset(x: isPad ? 88 : 58)
                     }
                 }
+            timerCounter
         }
     }
 
@@ -521,6 +526,25 @@ struct GameView: View {
         // Named after what this character actually collects, in the app's
         // language — the counter has not been flies-for-everyone since each
         // animal got its own food.
+    }
+
+    private var timerCounter: some View {
+        let minutes = model.timeRemaining / 60
+        let seconds = model.timeRemaining % 60
+        return HStack(spacing: isPad ? 8 : 5) {
+            Image(systemName: "timer")
+                .font(.system(size: isPad ? 24 : 16, weight: .bold))
+            Text(String(format: "%d:%02d", minutes, seconds))
+                .font(.system(size: hudNumberSize, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, isPad ? 16 : 11)
+        .frame(height: hudControlSize)
+        .background(character.deepColor, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.92), lineWidth: 3))
+        .accessibilityIdentifier("level-timer")
     }
 
     private var showsGameplayHUD: Bool {

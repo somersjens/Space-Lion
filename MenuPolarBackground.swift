@@ -47,9 +47,10 @@ struct MenuPolarBackground: View {
                 // it with the accent outright turned the floe into sand as soon
                 // as that accent was a warm one.
                 Ellipse()
-                    .fill(Color(red: 0.84, green: 0.95, blue: 1.00)
-                        .mix(with: accent, by: 0.16)
-                        .opacity(0.62))
+                    .fill(Color(red: 0.84, green: 0.95, blue: 1.00).opacity(0.62))
+                    .overlay {
+                        Ellipse().fill(accent.opacity(0.10))
+                    }
                     .frame(width: proxy.size.width * 0.58,
                            height: max(90, proxy.size.height * 0.23))
                     .offset(x: -proxy.size.width * 0.32,
