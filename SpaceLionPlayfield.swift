@@ -63,16 +63,15 @@ struct SpaceLionPlayfield: View {
                                   rightReserve: rightReserve,
                                   isPad: isPad)
             ZStack {
-                SpaceshipCockpit(accent: character.color,
-                                 deep: character.deepColor,
-                                 topReserve: topReserve,
+                SpaceshipCockpit(layout: metrics.cockpit,
+                                 isPad: isPad,
                                  isRunning: isRunning && !reduceMotion)
 
                 if let round {
                     ForEach(Array(round.options.prefix(8).enumerated()), id: \.element.id) { index, option in
                         answerButton(option,
                                      at: metrics.answerPoints[index],
-                                     orientation: metrics.answerOrientations[index],
+                                     lampEdge: index < 4 ? .leading : .trailing,
                                      centre: metrics.centre,
                                      size: metrics.answerSize,
                                      lionSize: metrics.lionSize)
@@ -117,7 +116,7 @@ struct SpaceLionPlayfield: View {
 
     private func answerButton(_ option: AnswerOption,
                               at point: CGPoint,
-                              orientation: Double,
+                              lampEdge: HorizontalEdge,
                               centre: CGPoint,
                               size: CGFloat,
                               lionSize: CGFloat) -> some View {
@@ -140,7 +139,7 @@ struct SpaceLionPlayfield: View {
                                size: size,
                                feedback: feedback,
                                isPressed: isPressed,
-                               orientationDegrees: orientation)
+                               lampEdge: lampEdge)
                 .scaleEffect(isSelected ? buttonImpactScale : 1)
         }
         .buttonStyle(.plain)
@@ -502,142 +501,211 @@ private extension SpaceLionPlayfield {
         let rightReserve: CGFloat
         let isPad: Bool
 
+        private var columnTop: CGFloat { topReserve + (isPad ? 12 : 6) }
+        private var columnBottom: CGFloat {
+            size.height - max(bottomReserve, isPad ? 16 : 8) - (isPad ? 6 : 2)
+        }
+        private var slotHeight: CGFloat { max(1, (columnBottom - columnTop) / 4) }
+
         var answerSize: CGFloat {
-            min(isPad ? 164 : 126,
-                max(isPad ? 132 : 100, size.height * (isPad ? 0.23 : 0.27)))
+            min(slotHeight * 0.90, isPad ? 150 : 112, size.width * 0.16)
         }
-        var lionSize: CGFloat { min(size.width * 0.23, size.height * (isPad ? 0.35 : 0.38)) }
-        var centre: CGPoint { CGPoint(x: size.width * 0.5, y: size.height * 0.55) }
+        private var columnPadding: CGFloat { answerSize * 0.17 }
+        private var leftX: CGFloat {
+            max(leftReserve, isPad ? 16 : 8) + columnPadding + answerSize / 2
+        }
+        private var rightX: CGFloat {
+            size.width - max(rightReserve, isPad ? 16 : 8) - columnPadding - answerSize / 2
+        }
 
-        /// Six controls live in the side columns and two in the lower console,
-        /// matching the cockpit's construction instead of floating in space.
+        /// Four controls in each side column, read top to bottom: the lowest
+        /// values on the left wall, the highest on the right wall.
         var answerPoints: [CGPoint] {
-            let leftX = max(answerSize * 0.54,
-                            leftReserve + answerSize * 0.54)
-            let rightX = min(size.width - answerSize * 0.54,
-                             size.width - rightReserve - answerSize * 0.54)
-            let topY = max(topReserve + answerSize * 0.46,
-                           size.height * 0.34)
-            let lowerY = size.height - bottomReserve - answerSize * 0.53
-            let middleY = (topY + lowerY) / 2
-            let consoleY = min(size.height - bottomReserve - answerSize * 0.43,
-                               size.height * 0.86)
-            return [
-                CGPoint(x: leftX, y: topY),
-                CGPoint(x: rightX, y: topY),
-                CGPoint(x: leftX, y: middleY),
-                CGPoint(x: rightX, y: middleY),
-                CGPoint(x: leftX, y: lowerY),
-                CGPoint(x: rightX, y: lowerY),
-                CGPoint(x: size.width * 0.38, y: consoleY),
-                CGPoint(x: size.width * 0.62, y: consoleY)
-            ]
+            let rows = (0..<4).map { columnTop + slotHeight * (CGFloat($0) + 0.5) }
+            return rows.map { CGPoint(x: leftX, y: $0) } + rows.map { CGPoint(x: rightX, y: $0) }
         }
 
-        /// The housing follows the surface it is bolted to: overhead controls
-        /// face down, side controls face inward and console controls face up.
-        /// SpaceConsoleButton counter-rotates its number so every value stays upright.
-        var answerOrientations: [Double] {
-            [-90, 90, -90, 90, -90, 90, 0, 0]
+        var cockpit: CockpitLayout {
+            let leftEdge = leftX + answerSize / 2 + columnPadding
+            let rightEdge = rightX - answerSize / 2 - columnPadding
+            let gap: CGFloat = isPad ? 30 : 18
+            let top = topReserve + (isPad ? 16 : 10)
+            let bottom = max(top + 60, size.height * (isPad ? 0.76 : 0.78))
+            return CockpitLayout(
+                windowRect: CGRect(x: leftEdge + gap,
+                                   y: top,
+                                   width: max(60, rightEdge - leftEdge - gap * 2),
+                                   height: bottom - top),
+                leftEdge: leftEdge,
+                rightEdge: rightEdge,
+                buttonPoints: answerPoints,
+                buttonSize: answerSize)
+        }
+
+        var centre: CGPoint {
+            let window = cockpit.windowRect
+            return CGPoint(x: window.midX, y: window.midY)
+        }
+
+        var lionSize: CGFloat {
+            min(size.width * 0.23,
+                size.height * (isPad ? 0.35 : 0.38),
+                cockpit.windowRect.height * 0.74)
         }
     }
 }
 
-/// A cockpit control built entirely from vector shapes. Its octagonal mounting
-/// plate turns with the wall it belongs to, while the answer remains upright.
+/// Where the cockpit's fixed structure sits, so the painted bays line up
+/// exactly with the interactive buttons laid over them.
+private struct CockpitLayout {
+    let windowRect: CGRect
+    let leftEdge: CGFloat
+    let rightEdge: CGFloat
+    let buttonPoints: [CGPoint]
+    let buttonSize: CGFloat
+}
+
+/// An arcade-style cockpit control built entirely from vector shapes: an
+/// octagonal mounting plate, a dark bezel, a glowing ring and a glossy cap
+/// with the answer printed on it.
 private struct SpaceConsoleButton: View {
     let text: String
     let size: CGFloat
     let feedback: HoopFeedback
     let isPressed: Bool
-    let orientationDegrees: Double
+    let lampEdge: HorizontalEdge
 
-    private let cyan = Color(red: 0.00, green: 0.78, blue: 1.00)
-    private let electricBlue = Color(red: 0.06, green: 0.28, blue: 0.92)
-    private let orange = Color(red: 1.00, green: 0.54, blue: 0.08)
+    private struct Palette {
+        let glow: Color
+        let highlight: Color
+        let deep: Color
+        let ink: Color
+    }
 
-    private var lightColor: Color {
+    private let orange = Color(red: 1.00, green: 0.56, blue: 0.10)
+
+    private var palette: Palette {
         switch feedback {
         case .correct, .revealedCorrect, .bonus:
-            return Color(red: 0.12, green: 0.92, blue: 0.46)
+            return Palette(glow: Color(red: 0.20, green: 0.95, blue: 0.50),
+                           highlight: Color(red: 0.86, green: 1.00, blue: 0.90),
+                           deep: Color(red: 0.00, green: 0.45, blue: 0.22),
+                           ink: Color(red: 0.00, green: 0.22, blue: 0.10))
         case .wrong:
-            return Color(red: 1.00, green: 0.18, blue: 0.30)
-        case .bypassed:
-            return .cyan
-        case .none, .inactive:
-            return cyan
+            return Palette(glow: Color(red: 1.00, green: 0.30, blue: 0.38),
+                           highlight: Color(red: 1.00, green: 0.87, blue: 0.87),
+                           deep: Color(red: 0.62, green: 0.02, blue: 0.12),
+                           ink: Color(red: 0.32, green: 0.00, blue: 0.06))
+        case .none, .inactive, .bypassed:
+            return Palette(glow: Color(red: 0.16, green: 0.76, blue: 1.00),
+                           highlight: Color(red: 0.84, green: 0.97, blue: 1.00),
+                           deep: Color(red: 0.03, green: 0.24, blue: 0.78),
+                           ink: Color(red: 0.00, green: 0.08, blue: 0.32))
         }
     }
 
     var body: some View {
+        let colors = palette
         ZStack {
-            SpaceModuleShape(cut: size * 0.18)
-                .fill(LinearGradient(
-                    colors: [Color(red: 0.16, green: 0.24, blue: 0.44),
-                             Color(red: 0.045, green: 0.075, blue: 0.16)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ))
-                .overlay {
-                    SpaceModuleShape(cut: size * 0.18)
-                        .stroke(Color(red: 0.015, green: 0.025, blue: 0.07),
-                                lineWidth: size * 0.075)
-                }
-                .overlay {
-                    SpaceModuleShape(cut: size * 0.18)
-                        .stroke(electricBlue.opacity(0.75), lineWidth: size * 0.022)
-                        .padding(size * 0.075)
-                }
+            housing
+            lamps
 
             Circle()
-                .fill(Color(red: 0.015, green: 0.04, blue: 0.11))
-                .padding(size * 0.145)
-                .overlay {
-                    Circle()
-                        .stroke(lightColor.opacity(0.35), lineWidth: size * 0.11)
-                        .padding(size * 0.17)
-                        .blur(radius: size * 0.035)
-                }
-                .overlay {
-                    Circle()
-                        .stroke(lightColor, lineWidth: size * 0.038)
-                        .padding(size * 0.17)
-                }
+                .fill(LinearGradient(colors: [Color(red: 0.02, green: 0.04, blue: 0.10),
+                                              Color(red: 0.22, green: 0.28, blue: 0.44)],
+                                     startPoint: .top,
+                                     endPoint: .bottom))
+                .overlay(Circle().stroke(.black.opacity(0.75), lineWidth: size * 0.018))
+                .padding(size * 0.115)
 
             Circle()
-                .fill(RadialGradient(
-                    colors: [Color.white.opacity(0.90),
-                             lightColor,
-                             electricBlue],
-                    center: .topLeading,
-                    startRadius: 1,
-                    endRadius: size * 0.43
-                ))
-                .padding(size * (isPressed ? 0.245 : 0.215))
-                .offset(y: isPressed ? size * 0.035 : 0)
-                .shadow(color: lightColor.opacity(0.85), radius: size * 0.10)
+                .stroke(colors.glow, lineWidth: size * 0.06)
+                .blur(radius: size * 0.04)
+                .padding(size * 0.17)
+            Circle()
+                .stroke(colors.glow, lineWidth: size * 0.02)
+                .padding(size * 0.165)
 
-            Capsule()
-                .fill(orange)
-                .frame(width: size * 0.30, height: size * 0.045)
-                .offset(y: -size * 0.42)
-                .shadow(color: orange.opacity(0.80), radius: size * 0.035)
-
-            Text(text)
-                .font(.system(size: size * 0.29, weight: .black, design: .rounded))
-                .foregroundStyle(Color(red: 0.01, green: 0.08, blue: 0.20))
-                .lineLimit(1)
-                .minimumScaleFactor(0.42)
-                .frame(width: size * 0.48, height: size * 0.32)
-                .shadow(color: .white.opacity(0.55), radius: 0.5, y: 1)
-                .rotationEffect(.degrees(-orientationDegrees))
+            cap(colors, diameter: size * 0.60)
         }
         .frame(width: size, height: size)
-        .rotationEffect(.degrees(orientationDegrees))
         .opacity(feedback == .inactive ? 0.55 : 1)
         .animation(.spring(response: 0.22, dampingFraction: 0.68), value: isPressed)
         .animation(.easeInOut(duration: 0.24), value: feedback)
-        .contentShape(SpaceModuleShape(cut: size * 0.18))
+        .contentShape(SpaceModuleShape(cut: size * 0.24))
+    }
+
+    private var housing: some View {
+        let cut = size * 0.24
+        return SpaceModuleShape(cut: cut)
+            .fill(LinearGradient(colors: [Color(red: 0.33, green: 0.40, blue: 0.56),
+                                          Color(red: 0.14, green: 0.19, blue: 0.32),
+                                          Color(red: 0.06, green: 0.08, blue: 0.17)],
+                                 startPoint: .top,
+                                 endPoint: .bottom))
+            .overlay {
+                SpaceModuleShape(cut: cut)
+                    .stroke(Color(red: 0.01, green: 0.02, blue: 0.06), lineWidth: size * 0.04)
+            }
+            .overlay {
+                SpaceModuleShape(cut: cut * 0.8)
+                    .stroke(LinearGradient(colors: [.white.opacity(0.45), .white.opacity(0.04)],
+                                           startPoint: .top,
+                                           endPoint: .bottom),
+                            lineWidth: size * 0.014)
+                    .padding(size * 0.045)
+            }
+            .shadow(color: .black.opacity(0.55), radius: size * 0.05, y: size * 0.03)
+    }
+
+    /// Two status lamps on the wall-facing edge of the plate.
+    private var lamps: some View {
+        VStack(spacing: size * 0.07) {
+            ForEach(0..<2, id: \.self) { _ in
+                Capsule()
+                    .fill(orange)
+                    .frame(width: size * 0.04, height: size * 0.12)
+            }
+        }
+        .shadow(color: orange.opacity(0.9), radius: size * 0.03)
+        .frame(maxWidth: .infinity, alignment: lampEdge == .leading ? .leading : .trailing)
+        .padding(.horizontal, size * 0.035)
+    }
+
+    private func cap(_ colors: Palette, diameter: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .fill(RadialGradient(colors: [colors.highlight, colors.glow, colors.deep],
+                                     center: UnitPoint(x: 0.40, y: 0.30),
+                                     startRadius: 0,
+                                     endRadius: diameter * 0.66))
+            Circle()
+                .strokeBorder(colors.deep.opacity(0.9), lineWidth: diameter * 0.03)
+            Ellipse()
+                .fill(LinearGradient(colors: [.white.opacity(0.60), .white.opacity(0)],
+                                     startPoint: .top,
+                                     endPoint: .bottom))
+                .frame(width: diameter * 0.68, height: diameter * 0.36)
+                .offset(y: -diameter * 0.25)
+
+            // White numerals with a hard ink edge and soft halo stay legible
+            // on the bright cap in every feedback colour.
+            Text(verbatim: text)
+                .font(.system(size: diameter * 0.46, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.38)
+                .frame(width: diameter * 0.80)
+                .shadow(color: colors.ink, radius: 0, y: diameter * 0.025)
+                .shadow(color: colors.ink.opacity(0.85), radius: diameter * 0.03)
+                .shadow(color: colors.ink.opacity(0.55), radius: diameter * 0.09)
+        }
+        .frame(width: diameter, height: diameter)
+        .scaleEffect(isPressed ? 0.92 : 1)
+        .brightness(isPressed ? 0.10 : 0)
+        .shadow(color: colors.glow.opacity(isPressed ? 1 : 0.65),
+                radius: size * (isPressed ? 0.13 : 0.07))
     }
 }
 
@@ -660,270 +728,550 @@ private struct SpaceModuleShape: Shape {
     }
 }
 
+/// The cockpit interior: a roof under the HUD, two button columns, a large
+/// chamfered windshield onto a nebula and a planet, and a perspective floor
+/// with a teleporter pad. Everything is drawn from paths and gradients.
 private struct SpaceshipCockpit: View {
-    let accent: Color
-    let deep: Color
-    let topReserve: CGFloat
+    let layout: CockpitLayout
+    let isPad: Bool
     let isRunning: Bool
 
+    private let cyan = Color(red: 0.10, green: 0.72, blue: 1.00)
+    private let blue = Color(red: 0.06, green: 0.30, blue: 0.86)
+    private let orange = Color(red: 1.00, green: 0.56, blue: 0.10)
+    private let metalLight = Color(red: 0.30, green: 0.37, blue: 0.54)
+    private let metal = Color(red: 0.14, green: 0.19, blue: 0.33)
+    private let metalDark = Color(red: 0.04, green: 0.06, blue: 0.14)
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !isRunning)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: !isRunning)) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
             Canvas { context, size in
-                drawCockpit(in: context, size: size, time: time)
+                draw(in: context, size: size, time: time)
             }
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
     }
 
-    private func drawCockpit(in context: GraphicsContext, size: CGSize, time: TimeInterval) {
-                let cyan = Color(red: 0.00, green: 0.72, blue: 1.00)
-                let blue = Color(red: 0.055, green: 0.24, blue: 0.72)
-                let orange = Color(red: 1.00, green: 0.52, blue: 0.07)
-                let hullLight = Color(red: 0.15, green: 0.22, blue: 0.40)
-                let hullDark = Color(red: 0.018, green: 0.035, blue: 0.09)
-                let roofHeight = max(topReserve * 0.94, size.height * 0.18)
-                let windowRect = CGRect(x: size.width * 0.145,
-                                        y: roofHeight + size.height * 0.018,
-                                        width: size.width * 0.71,
-                                        height: size.height * 0.57)
-                let window = chamferedPath(in: windowRect,
-                                           cut: min(size.width * 0.035,
-                                                    size.height * 0.07))
+    private var frameWidth: CGFloat { isPad ? 26 : 18 }
 
-                // One solid hull first; every later seam and inset therefore
-                // reads as part of the same ship rather than separate cards.
-                context.fill(Path(CGRect(origin: .zero, size: size)),
-                             with: .linearGradient(
-                                Gradient(colors: [hullLight, hullDark, .black]),
-                                startPoint: .zero,
-                                endPoint: CGPoint(x: size.width, y: size.height)))
+    private func draw(in context: GraphicsContext, size: CGSize, time: TimeInterval) {
+        let window = layout.windowRect
+        let cut = min(window.width, window.height) * 0.11
+        let floorTop = window.maxY + frameWidth * 0.5 + (isPad ? 14 : 9)
 
-                // Recess the windshield deeply into the hull before drawing
-                // what is outside it.
-                context.stroke(window, with: .color(.black.opacity(0.88)), lineWidth: 42)
-                context.stroke(window, with: .color(blue.opacity(0.58)), lineWidth: 30)
-                context.stroke(window, with: .color(hullDark), lineWidth: 20)
-
-                context.drawLayer { space in
-                    space.clip(to: window)
-                    space.fill(Path(windowRect),
-                               with: .linearGradient(
-                                Gradient(colors: [Color(red: 0.005, green: 0.015, blue: 0.09),
-                                                  Color(red: 0.01, green: 0.025, blue: 0.20),
-                                                  Color(red: 0.055, green: 0.015, blue: 0.16)]),
-                                startPoint: CGPoint(x: windowRect.minX, y: windowRect.minY),
-                                endPoint: CGPoint(x: windowRect.maxX, y: windowRect.maxY)))
-
-                    // A soft galaxy band, constructed from translucent paths.
-                    for band in 0..<5 {
-                        var galaxy = Path()
-                        let offset = CGFloat(band) * 7
-                        galaxy.move(to: CGPoint(x: windowRect.minX - 20,
-                                                y: windowRect.maxY - offset))
-                        galaxy.addCurve(to: CGPoint(x: windowRect.maxX + 30,
-                                                    y: windowRect.minY + offset * 0.55),
-                                        control1: CGPoint(x: windowRect.midX * 0.72,
-                                                          y: windowRect.midY + 40 - offset),
-                                        control2: CGPoint(x: windowRect.midX * 1.34,
-                                                          y: windowRect.midY - 50 + offset))
-                        space.stroke(galaxy,
-                                     with: .color(Color(red: 0.28, green: 0.18, blue: 0.85)
-                                        .opacity(0.08 + Double(band) * 0.025)),
-                                     lineWidth: 9 + CGFloat(band) * 3)
-                    }
-
-                    let starTravel = CGFloat(time.truncatingRemainder(dividingBy: 24)) / 24
-                    for index in 0..<142 {
-                        let baseX = CGFloat((index * 79 + 17) % 149) / 149
-                        let shifted = (baseX - starTravel * (index.isMultiple(of: 4) ? 0.20 : 0.10) + 1)
-                            .truncatingRemainder(dividingBy: 1)
-                        let x = windowRect.minX + shifted * windowRect.width
-                        let y = windowRect.minY
-                            + CGFloat((index * 53 + 7) % 137) / 137 * windowRect.height
-                        let pulse = 0.45 + (sin(time * 1.1 + Double(index)) + 1) * 0.24
-                        let radius = CGFloat(index.isMultiple(of: 13) ? 2.1 : (index.isMultiple(of: 4) ? 1.25 : 0.75))
-                        space.fill(Path(ellipseIn: CGRect(x: x - radius, y: y - radius,
-                                                         width: radius * 2,
-                                                         height: radius * 2)),
-                                   with: .color((index.isMultiple(of: 5) ? cyan : .white)
-                                    .opacity(pulse)))
-                        if index.isMultiple(of: 17) {
-                            var sparkle = Path()
-                            sparkle.move(to: CGPoint(x: x - radius * 3.2, y: y))
-                            sparkle.addLine(to: CGPoint(x: x + radius * 3.2, y: y))
-                            sparkle.move(to: CGPoint(x: x, y: y - radius * 3.2))
-                            sparkle.addLine(to: CGPoint(x: x, y: y + radius * 3.2))
-                            space.stroke(sparkle, with: .color(.white.opacity(0.72)), lineWidth: 0.8)
-                        }
-                    }
-                    // A large moving planet sits partly below the window edge.
-                    let orbit = CGFloat(time.truncatingRemainder(dividingBy: 88)) / 88
-                    let planetSide = size.height * 0.55
-                    let planet = CGRect(x: windowRect.maxX - planetSide * (0.68 + orbit * 0.34),
-                                        y: windowRect.maxY - planetSide * 0.31,
-                                        width: planetSide,
-                                        height: planetSide)
-                    space.fill(Path(ellipseIn: planet),
-                               with: .radialGradient(
-                                Gradient(colors: [.white.opacity(0.96),
-                                                  cyan,
-                                                  Color(red: 0.02, green: 0.18, blue: 0.72),
-                                                  Color(red: 0.005, green: 0.03, blue: 0.16)]),
-                                center: CGPoint(x: planet.midX - planet.width * 0.20,
-                                                y: planet.midY - planet.height * 0.22),
-                                startRadius: 1,
-                                endRadius: planet.width * 0.61))
-                    space.stroke(Path(ellipseIn: planet.insetBy(dx: -3, dy: -3)),
-                                 with: .color(cyan.opacity(0.75)), lineWidth: 5)
-
-                    // Windshield tint and reflected light.
-                    space.fill(Path(windowRect),
-                               with: .linearGradient(
-                                Gradient(colors: [cyan.opacity(0.08), .clear, accent.opacity(0.05)]),
-                                startPoint: CGPoint(x: windowRect.minX, y: windowRect.minY),
-                                endPoint: CGPoint(x: windowRect.maxX, y: windowRect.maxY)))
-                }
-
-                // Four nested rails give the opening the depth and blue/orange
-                // rhythm of a real illuminated frame.
-                context.stroke(window, with: .color(blue), lineWidth: 14)
-                context.stroke(window, with: .color(orange), lineWidth: 7)
-                context.stroke(window, with: .color(cyan), lineWidth: 3)
-                context.stroke(chamferedPath(in: windowRect.insetBy(dx: 7, dy: 7),
-                                             cut: min(size.width * 0.029, size.height * 0.058)),
-                               with: .color(.white.opacity(0.24)), lineWidth: 1.2)
-
-                // Upper hull plates and ribs.
-                for row in 0..<3 {
-                    let y = roofHeight * (0.28 + CGFloat(row) * 0.22)
-                    var seam = Path()
-                    seam.move(to: CGPoint(x: size.width * 0.10, y: y))
-                    seam.addLine(to: CGPoint(x: size.width * 0.90, y: y))
-                    context.stroke(seam, with: .color(.black.opacity(0.48)), lineWidth: 2)
-                    context.stroke(seam, with: .color(blue.opacity(0.24)), lineWidth: 0.8)
-                }
-
-                let leftRibX = windowRect.minX - size.width * 0.025
-                let rightRibX = windowRect.maxX + size.width * 0.025
-                for x in [leftRibX, rightRibX] {
-                    var rib = Path()
-                    rib.move(to: CGPoint(x: x, y: roofHeight * 0.25))
-                    rib.addLine(to: CGPoint(x: x, y: windowRect.maxY + size.height * 0.04))
-                    context.stroke(rib, with: .color(.black.opacity(0.62)), lineWidth: 9)
-                    context.stroke(rib, with: .color(blue.opacity(0.55)), lineWidth: 3)
-                }
-
-                // Floor/console in perspective, including concentric centre
-                // rings and converging plate seams.
-                let floorTop = windowRect.maxY + size.height * 0.025
-                var floorLip = Path()
-                floorLip.move(to: CGPoint(x: size.width * 0.08, y: size.height))
-                floorLip.addLine(to: CGPoint(x: size.width * 0.20, y: floorTop))
-                floorLip.addLine(to: CGPoint(x: size.width * 0.80, y: floorTop))
-                floorLip.addLine(to: CGPoint(x: size.width * 0.92, y: size.height))
-                floorLip.closeSubpath()
-                context.fill(floorLip,
-                             with: .linearGradient(
-                                Gradient(colors: [hullLight.opacity(0.90), hullDark]),
-                                startPoint: CGPoint(x: 0, y: floorTop),
-                                endPoint: CGPoint(x: 0, y: size.height)))
-                context.stroke(floorLip, with: .color(blue.opacity(0.72)), lineWidth: 3)
-                context.stroke(floorLip, with: .color(orange.opacity(0.72)), lineWidth: 1.3)
-
-                for fraction in stride(from: CGFloat(0.18), through: 0.82, by: 0.16) {
-                    var seam = Path()
-                    seam.move(to: CGPoint(x: size.width * fraction, y: size.height))
-                    seam.addLine(to: CGPoint(x: size.width * 0.5
-                                              + (fraction - 0.5) * size.width * 0.28,
-                                              y: floorTop))
-                    context.stroke(seam, with: .color(blue.opacity(0.25)), lineWidth: 1.2)
-                }
-
-                let ringRect = CGRect(x: size.width * 0.38,
-                                      y: size.height * 0.88,
-                                      width: size.width * 0.24,
-                                      height: size.height * 0.20)
-                context.stroke(Path(ellipseIn: ringRect), with: .color(.black.opacity(0.75)), lineWidth: 15)
-                context.stroke(Path(ellipseIn: ringRect), with: .color(blue.opacity(0.80)), lineWidth: 7)
-                context.stroke(Path(ellipseIn: ringRect.insetBy(dx: 9, dy: 7)),
-                               with: .color(cyan.opacity(0.68)), lineWidth: 2.5)
-
-                // Repeated light bars unify roof, side columns and console.
-                for center in [CGPoint(x: size.width * 0.34, y: roofHeight * 0.72),
-                               CGPoint(x: size.width * 0.66, y: roofHeight * 0.72)] {
-                    drawLightBar(in: context, center: center,
-                                 length: size.width * 0.14, thickness: 5,
-                                 color: cyan, horizontal: true)
-                }
-                for y in [size.height * 0.31, size.height * 0.63] {
-                    drawLightBar(in: context,
-                                 center: CGPoint(x: size.width * 0.105, y: y),
-                                 length: size.height * 0.10, thickness: 4,
-                                 color: cyan, horizontal: false)
-                    drawLightBar(in: context,
-                                 center: CGPoint(x: size.width * 0.895, y: y),
-                                 length: size.height * 0.10, thickness: 4,
-                                 color: cyan, horizontal: false)
-                }
-                for x in [size.width * 0.22, size.width * 0.50, size.width * 0.78] {
-                    drawLightBar(in: context,
-                                 center: CGPoint(x: x, y: size.height * 0.965),
-                                 length: size.width * 0.09, thickness: 4,
-                                 color: cyan, horizontal: true)
-                }
-
-                // Rivets and small orange status lamps keep the large surfaces
-                // from reading as flat gradients.
-                for index in 0..<18 {
-                    let x = size.width * (0.035 + CGFloat(index % 9) * 0.116)
-                    let y = index < 9 ? roofHeight * 0.16 : size.height * 0.955
-                    context.fill(Path(ellipseIn: CGRect(x: x - 1.7, y: y - 1.7,
-                                                        width: 3.4, height: 3.4)),
-                                 with: .color(.white.opacity(0.28)))
-                }
-                drawLightBar(in: context,
-                             center: CGPoint(x: size.width * 0.055, y: roofHeight * 0.38),
-                             length: size.width * 0.036, thickness: 4,
-                             color: orange, horizontal: true)
-                drawLightBar(in: context,
-                             center: CGPoint(x: size.width * 0.945, y: roofHeight * 0.38),
-                             length: size.width * 0.036, thickness: 4,
-                             color: orange, horizontal: true)
+        context.fill(Path(CGRect(origin: .zero, size: size)),
+                     with: .linearGradient(Gradient(colors: [metal, metalDark, .black]),
+                                           startPoint: .zero,
+                                           endPoint: CGPoint(x: 0, y: size.height)))
+        drawRoof(in: context, size: size, window: window)
+        drawFloor(in: context, size: size, top: floorTop, time: time)
+        drawSpace(in: context, window: window, cut: cut, time: time)
+        drawWindowFrame(in: context, window: window, cut: cut)
+        drawSill(in: context, window: window, floorTop: floorTop)
+        drawColumn(in: context, size: size,
+                   minX: -2, maxX: layout.leftEdge, innerIsTrailing: true)
+        drawColumn(in: context, size: size,
+                   minX: layout.rightEdge, maxX: size.width + 2, innerIsTrailing: false)
     }
 
-    private func chamferedPath(in rect: CGRect, cut: CGFloat) -> Path {
-        let c = min(cut, min(rect.width, rect.height) * 0.22)
+    // MARK: Hull
+
+    private func drawRoof(in context: GraphicsContext, size: CGSize, window: CGRect) {
+        let bottom = window.minY - frameWidth * 0.5
+        guard bottom > 0 else { return }
+        context.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: bottom)),
+                     with: .linearGradient(Gradient(colors: [metalDark, metal, metalLight]),
+                                           startPoint: .zero,
+                                           endPoint: CGPoint(x: 0, y: bottom)))
+        for fraction in [0.34, 0.68] as [CGFloat] {
+            seam(context,
+                 from: CGPoint(x: 0, y: bottom * fraction),
+                 to: CGPoint(x: size.width, y: bottom * fraction))
+        }
+        for fraction in stride(from: CGFloat(0.2), through: 0.8, by: 0.2) {
+            seam(context,
+                 from: CGPoint(x: size.width * fraction, y: bottom * 0.68),
+                 to: CGPoint(x: size.width * fraction, y: bottom))
+        }
+    }
+
+    private func drawColumn(in context: GraphicsContext,
+                            size: CGSize,
+                            minX: CGFloat,
+                            maxX: CGFloat,
+                            innerIsTrailing: Bool) {
+        guard maxX > minX else { return }
+        let rect = CGRect(x: minX, y: 0, width: maxX - minX, height: size.height)
+        let innerX = innerIsTrailing ? maxX : minX
+        let outerX = innerIsTrailing ? minX : maxX
+        let inward: CGFloat = innerIsTrailing ? -1 : 1
+        let buttonSize = layout.buttonSize
+
+        context.fill(Path(rect),
+                     with: .linearGradient(Gradient(colors: [metalDark, metal, metalLight]),
+                                           startPoint: CGPoint(x: outerX, y: 0),
+                                           endPoint: CGPoint(x: innerX, y: 0)))
+        seam(context,
+             from: CGPoint(x: outerX - inward * rect.width * 0.18, y: 0),
+             to: CGPoint(x: outerX - inward * rect.width * 0.18, y: size.height))
+
+        var edge = Path()
+        edge.move(to: CGPoint(x: innerX, y: 0))
+        edge.addLine(to: CGPoint(x: innerX, y: size.height))
+        context.stroke(edge, with: .color(.black.opacity(0.8)), lineWidth: 4)
+        context.stroke(edge.offsetBy(dx: inward * 2.5, dy: 0),
+                       with: .color(.white.opacity(0.18)), lineWidth: 1)
+
+        let points = layout.buttonPoints.filter { $0.x > minX && $0.x < maxX }
+        var glow = context
+        glow.blendMode = .plusLighter
+
+        for (index, point) in points.enumerated() {
+            let bay = CGRect(x: point.x - buttonSize * 0.54,
+                             y: point.y - buttonSize * 0.54,
+                             width: buttonSize * 1.08,
+                             height: buttonSize * 1.08)
+            let bayPath = chamfered(bay, cut: buttonSize * 0.28)
+            context.fill(bayPath,
+                         with: .linearGradient(Gradient(colors: [.black.opacity(0.9), metalDark]),
+                                               startPoint: CGPoint(x: 0, y: bay.minY),
+                                               endPoint: CGPoint(x: 0, y: bay.maxY)))
+            context.stroke(bayPath, with: .color(.white.opacity(0.10)), lineWidth: 1)
+            glow.fill(Path(ellipseIn: bay.insetBy(dx: -buttonSize * 0.10, dy: -buttonSize * 0.10)),
+                      with: .radialGradient(Gradient(colors: [cyan.opacity(0.20), cyan.opacity(0)]),
+                                            center: point,
+                                            startRadius: buttonSize * 0.3,
+                                            endRadius: buttonSize * 0.66))
+
+            lightBar(context,
+                     center: CGPoint(x: innerX + inward * 7, y: point.y),
+                     length: buttonSize * 0.30,
+                     thickness: isPad ? 3.5 : 2.5,
+                     color: orange,
+                     vertical: true)
+
+            guard index + 1 < points.count else { continue }
+            let between = (point.y + points[index + 1].y) / 2
+            seam(context,
+                 from: CGPoint(x: minX, y: between),
+                 to: CGPoint(x: maxX, y: between))
+            lightBar(context,
+                     center: CGPoint(x: innerX + inward * 7, y: between),
+                     length: buttonSize * 0.16,
+                     thickness: isPad ? 3.5 : 2.5,
+                     color: cyan,
+                     vertical: true)
+        }
+    }
+
+    private func drawSill(in context: GraphicsContext, window: CGRect, floorTop: CGFloat) {
+        let top = window.maxY + frameWidth * 0.5
+        guard floorTop > top, layout.rightEdge > layout.leftEdge else { return }
+        let sill = CGRect(x: layout.leftEdge, y: top,
+                          width: layout.rightEdge - layout.leftEdge,
+                          height: floorTop - top)
+        context.fill(Path(sill),
+                     with: .linearGradient(Gradient(colors: [metal, metalDark]),
+                                           startPoint: CGPoint(x: 0, y: sill.minY),
+                                           endPoint: CGPoint(x: 0, y: sill.maxY)))
+        seam(context, from: CGPoint(x: sill.minX, y: sill.minY),
+             to: CGPoint(x: sill.maxX, y: sill.minY))
+
+        for fraction in [0.14, 0.32, 0.5, 0.68, 0.86] as [CGFloat] {
+            lightBar(context,
+                     center: CGPoint(x: sill.minX + sill.width * fraction, y: sill.midY),
+                     length: sill.width * 0.09,
+                     thickness: isPad ? 3.5 : 2.5,
+                     color: cyan)
+        }
+
+        var lip = Path()
+        lip.move(to: CGPoint(x: sill.minX, y: sill.maxY - 0.75))
+        lip.addLine(to: CGPoint(x: sill.maxX, y: sill.maxY - 0.75))
+        var glow = context
+        glow.blendMode = .plusLighter
+        glow.stroke(lip, with: .color(orange.opacity(0.35)), lineWidth: 5)
+        context.stroke(lip, with: .color(orange), lineWidth: 1.5)
+    }
+
+    private func drawFloor(in context: GraphicsContext, size: CGSize, top: CGFloat, time: TimeInterval) {
+        let bottom = size.height
+        guard bottom > top else { return }
+        let depth = bottom - top
+        context.fill(Path(CGRect(x: 0, y: top, width: size.width, height: depth)),
+                     with: .linearGradient(Gradient(colors: [Color(red: 0.16, green: 0.24, blue: 0.46),
+                                                             Color(red: 0.07, green: 0.11, blue: 0.25),
+                                                             Color(red: 0.02, green: 0.04, blue: 0.11)]),
+                                           startPoint: CGPoint(x: 0, y: top),
+                                           endPoint: CGPoint(x: 0, y: bottom)))
+
+        var glow = context
+        glow.blendMode = .plusLighter
+        let sheen = CGRect(x: size.width * 0.18, y: top - depth * 0.3,
+                           width: size.width * 0.64, height: depth * 0.9)
+        glow.fill(Path(ellipseIn: sheen),
+                  with: .radialGradient(Gradient(colors: [cyan.opacity(0.14), cyan.opacity(0)]),
+                                        center: CGPoint(x: sheen.midX, y: sheen.midY),
+                                        startRadius: 0,
+                                        endRadius: sheen.width * 0.5))
+
+        let vanishing = CGPoint(x: size.width / 2, y: top - depth * 2.4)
+        let topFraction = (top - vanishing.y) / (bottom - vanishing.y)
+        for step in -7...7 {
+            let x = size.width / 2 + CGFloat(step) * size.width * 0.11
+            seam(context,
+                 from: CGPoint(x: vanishing.x + (x - vanishing.x) * topFraction, y: top),
+                 to: CGPoint(x: x, y: bottom))
+        }
+        for fraction in [0.12, 0.32, 0.62] as [CGFloat] {
+            let y = top + depth * fraction
+            seam(context, from: CGPoint(x: 0, y: y), to: CGPoint(x: size.width, y: y))
+        }
+
+        let lightRow = top + depth * 0.22
+        let rowFraction = (lightRow - vanishing.y) / (bottom - vanishing.y)
+        for step in [-3, -2, 2, 3] {
+            let x = vanishing.x + (CGFloat(step) - 0.5 * CGFloat(step.signum())) * size.width * 0.11 * rowFraction
+            lightBar(context,
+                     center: CGPoint(x: x, y: lightRow),
+                     length: size.width * 0.045 * rowFraction,
+                     thickness: isPad ? 3 : 2,
+                     color: cyan)
+        }
+
+        drawPlatform(in: context, size: size, floorDepth: depth, time: time)
+    }
+
+    private func drawPlatform(in context: GraphicsContext, size: CGSize, floorDepth: CGFloat, time: TimeInterval) {
+        let width = min(size.width * 0.40, layout.windowRect.width * 0.62)
+        let height = min(width * 0.30, floorDepth * 1.5)
+        let pad = CGRect(x: size.width / 2 - width / 2,
+                         y: size.height - height * 0.62,
+                         width: width,
+                         height: height)
+        let centre = CGPoint(x: pad.midX, y: pad.midY)
+        let pulse = 0.75 + 0.25 * sin(time * 1.6)
+
+        context.fill(Path(ellipseIn: pad.insetBy(dx: -width * 0.04, dy: -height * 0.06)),
+                     with: .color(.black.opacity(0.45)))
+        context.fill(Path(ellipseIn: pad),
+                     with: .linearGradient(Gradient(colors: [metalLight, metal, metalDark]),
+                                           startPoint: CGPoint(x: 0, y: pad.minY),
+                                           endPoint: CGPoint(x: 0, y: pad.maxY)))
+        context.stroke(Path(ellipseIn: pad), with: .color(.black.opacity(0.7)), lineWidth: 2)
+
+        for bolt in 0..<18 {
+            let angle = Double(bolt) / 18 * 2 * .pi
+            let point = CGPoint(x: centre.x + cos(angle) * width * 0.47,
+                                y: centre.y + sin(angle) * height * 0.47)
+            guard point.y < size.height - 2 else { continue }
+            let radius = max(1.2, width * 0.006)
+            context.fill(Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius,
+                                                width: radius * 2, height: radius * 2)),
+                         with: .color(.white.opacity(0.35)))
+        }
+
+        let inner = pad.insetBy(dx: width * 0.09, dy: height * 0.09)
+        context.fill(Path(ellipseIn: inner), with: .color(metalDark))
+
+        var glow = context
+        glow.blendMode = .plusLighter
+        let ring = pad.insetBy(dx: width * 0.13, dy: height * 0.13)
+        glow.stroke(Path(ellipseIn: ring), with: .color(cyan.opacity(0.35 * pulse)), lineWidth: isPad ? 12 : 8)
+        context.stroke(Path(ellipseIn: ring), with: .color(cyan), lineWidth: isPad ? 2.5 : 1.8)
+
+        let core = pad.insetBy(dx: width * 0.19, dy: height * 0.19)
+        context.fill(Path(ellipseIn: core),
+                     with: .radialGradient(Gradient(colors: [cyan.opacity(0.85 * pulse),
+                                                             blue.opacity(0.75),
+                                                             Color(red: 0.02, green: 0.05, blue: 0.20)]),
+                                           center: centre,
+                                           startRadius: 0,
+                                           endRadius: core.width * 0.5))
+        context.stroke(Path(ellipseIn: pad.insetBy(dx: width * 0.27, dy: height * 0.27)),
+                       with: .color(cyan.opacity(0.45)), lineWidth: 1)
+    }
+
+    // MARK: Windshield
+
+    private func drawSpace(in context: GraphicsContext, window: CGRect, cut: CGFloat, time: TimeInterval) {
+        let glass = chamfered(window, cut: cut)
+        context.drawLayer { space in
+            space.clip(to: glass)
+            space.fill(Path(window),
+                       with: .linearGradient(Gradient(colors: [Color(red: 0.01, green: 0.01, blue: 0.08),
+                                                               Color(red: 0.03, green: 0.04, blue: 0.20),
+                                                               Color(red: 0.04, green: 0.09, blue: 0.30)]),
+                                             startPoint: CGPoint(x: window.minX, y: window.minY),
+                                             endPoint: CGPoint(x: window.maxX, y: window.maxY)))
+            drawNebula(in: space, window: window)
+            drawStars(in: space, window: window, time: time)
+            drawPlanet(in: space, window: window, time: time)
+
+            for (width, opacity) in [(3.0, 0.16), (2.0, 0.20), (1.4, 0.28)] as [(CGFloat, Double)] {
+                space.stroke(glass, with: .color(.black.opacity(opacity)), lineWidth: frameWidth * width)
+            }
+
+            var glare = Path()
+            glare.move(to: CGPoint(x: window.minX + window.width * 0.10, y: window.minY))
+            glare.addLine(to: CGPoint(x: window.minX + window.width * 0.22, y: window.minY))
+            glare.addLine(to: CGPoint(x: window.minX, y: window.minY + window.height * 0.62))
+            glare.addLine(to: CGPoint(x: window.minX, y: window.minY + window.height * 0.36))
+            glare.closeSubpath()
+            space.fill(glare, with: .color(.white.opacity(0.035)))
+        }
+    }
+
+    private func drawNebula(in context: GraphicsContext, window: CGRect) {
+        var glow = context
+        glow.blendMode = .plusLighter
+        let start = CGPoint(x: window.minX + window.width * 0.42, y: window.minY - window.height * 0.05)
+        let end = CGPoint(x: window.minX - window.width * 0.04, y: window.minY + window.height * 0.74)
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let length = max(1, hypot(dx, dy))
+        let normal = CGPoint(x: -dy / length, y: dx / length)
+        let violet = Color(red: 0.50, green: 0.30, blue: 0.95)
+        let magenta = Color(red: 0.75, green: 0.35, blue: 0.95)
+
+        for index in 0..<18 {
+            let t = CGFloat(index) / 17
+            let wobble = sin(t * 7 + 1.3) * window.height * 0.05
+            let centre = CGPoint(x: start.x + dx * t + normal.x * wobble,
+                                 y: start.y + dy * t + normal.y * wobble)
+            let radius = window.height * (0.08 + 0.10 * sin(t * .pi)) * (0.7 + random(index, 3) * 0.6)
+            let color = index.isMultiple(of: 3) ? magenta : violet
+            glow.fill(Path(ellipseIn: CGRect(x: centre.x - radius, y: centre.y - radius,
+                                             width: radius * 2, height: radius * 2)),
+                      with: .radialGradient(Gradient(colors: [color.opacity(0.20), color.opacity(0)]),
+                                            center: centre,
+                                            startRadius: 0,
+                                            endRadius: radius))
+        }
+
+        let dust = Color(red: 0.86, green: 0.80, blue: 1.00)
+        for index in 0..<160 {
+            let t = random(index, 11)
+            let spread = (random(index, 12) + random(index, 13) - 1)
+                * window.height * 0.13 * (0.4 + sin(t * .pi))
+            let point = CGPoint(x: start.x + dx * t + normal.x * spread,
+                                y: start.y + dy * t + normal.y * spread)
+            let radius = 0.3 + random(index, 14) * 0.8
+            glow.fill(Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius,
+                                             width: radius * 2, height: radius * 2)),
+                      with: .color(dust.opacity(0.25 + Double(random(index, 15)) * 0.5)))
+        }
+    }
+
+    private func drawStars(in context: GraphicsContext, window: CGRect, time: TimeInterval) {
+        var glow = context
+        glow.blendMode = .plusLighter
+        let count = min(320, Int(window.width * window.height / 900))
+        for index in 0..<count {
+            let depth = random(index, 1)
+            let speed = 0.002 + depth * 0.006
+            let x = window.minX + wrap(random(index, 2) - CGFloat(time) * speed) * window.width
+            let y = window.minY + random(index, 4) * window.height
+            let radius = 0.35 + depth * depth * (isPad ? 1.9 : 1.4)
+            let twinkle = 0.55 + 0.45 * sin(time * (0.8 + Double(random(index, 5)) * 2.2) + Double(index))
+            let tint = index.isMultiple(of: 7) ? Color(red: 0.70, green: 0.85, blue: 1.00) : .white
+            glow.fill(Path(ellipseIn: CGRect(x: x - radius, y: y - radius,
+                                             width: radius * 2, height: radius * 2)),
+                      with: .color(tint.opacity(twinkle * (0.4 + Double(depth) * 0.6))))
+
+            guard depth > 0.93 else { continue }
+            let arm = radius * 4.5
+            var sparkle = Path()
+            sparkle.move(to: CGPoint(x: x - arm, y: y))
+            sparkle.addLine(to: CGPoint(x: x + arm, y: y))
+            sparkle.move(to: CGPoint(x: x, y: y - arm))
+            sparkle.addLine(to: CGPoint(x: x, y: y + arm))
+            glow.stroke(sparkle, with: .color(tint.opacity(0.55 * twinkle)), lineWidth: 0.7)
+            glow.fill(Path(ellipseIn: CGRect(x: x - arm, y: y - arm, width: arm * 2, height: arm * 2)),
+                      with: .radialGradient(Gradient(colors: [tint.opacity(0.30 * twinkle), tint.opacity(0)]),
+                                            center: CGPoint(x: x, y: y),
+                                            startRadius: 0,
+                                            endRadius: arm))
+        }
+    }
+
+    private func drawPlanet(in context: GraphicsContext, window: CGRect, time: TimeInterval) {
+        let radius = min(window.height * 0.80, window.width * 0.42)
+        let centre = CGPoint(x: window.maxX - radius * 0.32, y: window.maxY + radius * 0.40)
+        let disc = CGRect(x: centre.x - radius, y: centre.y - radius,
+                          width: radius * 2, height: radius * 2)
+        let planet = Path(ellipseIn: disc)
+
+        var glow = context
+        glow.blendMode = .plusLighter
+        glow.fill(Path(ellipseIn: disc.insetBy(dx: -radius * 0.25, dy: -radius * 0.25)),
+                  with: .radialGradient(Gradient(stops: [
+                    .init(color: cyan.opacity(0), location: 0.70),
+                    .init(color: cyan.opacity(0.45), location: 0.80),
+                    .init(color: blue.opacity(0.18), location: 0.88),
+                    .init(color: blue.opacity(0), location: 1)
+                  ]),
+                  center: centre,
+                  startRadius: 0,
+                  endRadius: radius * 1.25))
+
+        context.fill(planet,
+                     with: .radialGradient(Gradient(colors: [Color(red: 0.42, green: 0.66, blue: 1.00),
+                                                             Color(red: 0.10, green: 0.36, blue: 0.86),
+                                                             Color(red: 0.03, green: 0.14, blue: 0.46),
+                                                             Color(red: 0.01, green: 0.04, blue: 0.16)]),
+                                           center: CGPoint(x: centre.x - radius * 0.45,
+                                                           y: centre.y - radius * 0.55),
+                                           startRadius: 0,
+                                           endRadius: radius * 1.7))
+
+        context.drawLayer { surface in
+            surface.clip(to: planet)
+            let spin = CGFloat(time) * 0.0035
+            let land = Color(red: 0.70, green: 0.76, blue: 0.90)
+            for index in 0..<46 {
+                let x = disc.minX + (wrap(random(index, 21) + spin) * 1.3 - 0.15) * disc.width
+                let y = disc.minY + random(index, 22) * disc.height
+                let width = radius * (0.10 + random(index, 23) * 0.26)
+                let height = width * (0.35 + random(index, 24) * 0.35)
+                surface.fill(Path(ellipseIn: CGRect(x: x - width / 2, y: y - height / 2,
+                                                    width: width, height: height)),
+                             with: .color(land.opacity(0.10 + Double(random(index, 25)) * 0.22)))
+            }
+            for index in 0..<22 {
+                let x = disc.minX + (wrap(random(index, 31) + spin * 1.4) * 1.6 - 0.3) * disc.width
+                let y = disc.minY + random(index, 32) * disc.height
+                let width = radius * (0.30 + random(index, 33) * 0.30)
+                let height = radius * (0.03 + random(index, 34) * 0.03)
+                surface.fill(Path(roundedRect: CGRect(x: x - width / 2, y: y - height / 2,
+                                                      width: width, height: height),
+                                  cornerRadius: height / 2),
+                             with: .color(.white.opacity(0.12 + Double(random(index, 35)) * 0.16)))
+            }
+            surface.fill(planet,
+                         with: .radialGradient(Gradient(stops: [
+                            .init(color: .clear, location: 0.45),
+                            .init(color: .black.opacity(0.55), location: 1)
+                         ]),
+                         center: CGPoint(x: centre.x - radius * 0.35, y: centre.y - radius * 0.45),
+                         startRadius: 0,
+                         endRadius: radius * 1.6))
+        }
+
+        glow.stroke(Path(ellipseIn: disc), with: .color(cyan.opacity(0.25)), lineWidth: isPad ? 10 : 7)
+        glow.stroke(Path(ellipseIn: disc.insetBy(dx: 1, dy: 1)),
+                    with: .color(cyan.opacity(0.85)), lineWidth: isPad ? 3 : 2)
+    }
+
+    private func drawWindowFrame(in context: GraphicsContext, window: CGRect, cut: CGFloat) {
+        let width = frameWidth
+        let frame = chamfered(window, cut: cut)
+        context.stroke(frame, with: .color(.black.opacity(0.7)), lineWidth: width + 10)
+        context.stroke(frame,
+                       with: .linearGradient(Gradient(colors: [metalLight, metal, metalDark, metal]),
+                                             startPoint: CGPoint(x: 0, y: window.minY - width),
+                                             endPoint: CGPoint(x: 0, y: window.maxY + width)),
+                       lineWidth: width)
+        context.stroke(chamfered(window, cut: cut, outset: width * 0.5),
+                       with: .color(.white.opacity(0.18)), lineWidth: 1)
+        context.stroke(chamfered(window, cut: cut, outset: -width * 0.5),
+                       with: .color(.black.opacity(0.8)), lineWidth: 2)
+
+        var glow = context
+        glow.blendMode = .plusLighter
+        let rail = chamfered(window, cut: cut, outset: width * 0.30)
+        glow.stroke(rail, with: .color(orange.opacity(0.35)), lineWidth: isPad ? 9 : 6)
+        context.stroke(rail, with: .color(orange), lineWidth: isPad ? 3.2 : 2.2)
+
+        let neon = chamfered(window, cut: cut, outset: -width * 0.22)
+        glow.stroke(neon, with: .color(cyan.opacity(0.45)), lineWidth: isPad ? 10 : 7)
+        context.stroke(neon, with: .color(Color(red: 0.55, green: 0.90, blue: 1.00)),
+                       lineWidth: isPad ? 2.6 : 1.8)
+
+        for fraction in [0.24, 0.76] as [CGFloat] {
+            lightBar(context,
+                     center: CGPoint(x: window.minX + window.width * fraction,
+                                     y: window.minY - width * 0.04),
+                     length: window.width * 0.16,
+                     thickness: isPad ? 3.5 : 2.5,
+                     color: cyan)
+        }
+
+        let boltRadius = width * 0.13
+        for corner in [CGPoint(x: window.minX + cut / 2, y: window.minY + cut / 2),
+                       CGPoint(x: window.maxX - cut / 2, y: window.minY + cut / 2),
+                       CGPoint(x: window.minX + cut / 2, y: window.maxY - cut / 2),
+                       CGPoint(x: window.maxX - cut / 2, y: window.maxY - cut / 2)] {
+            let bolt = Path(ellipseIn: CGRect(x: corner.x - boltRadius, y: corner.y - boltRadius,
+                                              width: boltRadius * 2, height: boltRadius * 2))
+            context.fill(bolt, with: .color(metalLight))
+            context.stroke(bolt, with: .color(.black.opacity(0.7)), lineWidth: 1)
+        }
+    }
+
+    // MARK: Helpers
+
+    private func chamfered(_ rect: CGRect, cut: CGFloat, outset: CGFloat = 0) -> Path {
+        let r = rect.insetBy(dx: -outset, dy: -outset)
+        // Offsetting a 45° chamfer by d moves its axis cut by d · (2 − √2).
+        let c = max(0, min(cut + outset * 0.586, min(r.width, r.height) * 0.5))
         var path = Path()
-        path.move(to: CGPoint(x: rect.minX + c, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX - c, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + c))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - c))
-        path.addLine(to: CGPoint(x: rect.maxX - c, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX + c, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - c))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + c))
+        path.move(to: CGPoint(x: r.minX + c, y: r.minY))
+        path.addLine(to: CGPoint(x: r.maxX - c, y: r.minY))
+        path.addLine(to: CGPoint(x: r.maxX, y: r.minY + c))
+        path.addLine(to: CGPoint(x: r.maxX, y: r.maxY - c))
+        path.addLine(to: CGPoint(x: r.maxX - c, y: r.maxY))
+        path.addLine(to: CGPoint(x: r.minX + c, y: r.maxY))
+        path.addLine(to: CGPoint(x: r.minX, y: r.maxY - c))
+        path.addLine(to: CGPoint(x: r.minX, y: r.minY + c))
         path.closeSubpath()
         return path
     }
 
-    private func drawLightBar(in context: GraphicsContext,
-                              center: CGPoint,
-                              length: CGFloat,
-                              thickness: CGFloat,
-                              color: Color,
-                              horizontal: Bool) {
-        let outer = horizontal
-            ? CGRect(x: center.x - length / 2, y: center.y - thickness,
-                     width: length, height: thickness * 2)
-            : CGRect(x: center.x - thickness, y: center.y - length / 2,
-                     width: thickness * 2, height: length)
-        let inner = outer.insetBy(dx: horizontal ? 2 : 1,
-                                  dy: horizontal ? 1 : 2)
-        context.fill(Path(roundedRect: outer, cornerRadius: thickness),
-                     with: .color(color.opacity(0.20)))
-        context.fill(Path(roundedRect: inner, cornerRadius: thickness),
-                     with: .color(color.opacity(0.95)))
+    private func seam(_ context: GraphicsContext, from start: CGPoint, to end: CGPoint) {
+        var path = Path()
+        path.move(to: start)
+        path.addLine(to: end)
+        context.stroke(path, with: .color(.black.opacity(0.55)), lineWidth: 1.6)
+        context.stroke(path.offsetBy(dx: 0.8, dy: 0.8), with: .color(.white.opacity(0.07)), lineWidth: 0.8)
+    }
+
+    private func lightBar(_ context: GraphicsContext,
+                          center: CGPoint,
+                          length: CGFloat,
+                          thickness: CGFloat,
+                          color: Color,
+                          vertical: Bool = false) {
+        let width = vertical ? thickness : length
+        let height = vertical ? length : thickness
+        let bar = CGRect(x: center.x - width / 2, y: center.y - height / 2, width: width, height: height)
+        var glow = context
+        glow.blendMode = .plusLighter
+        glow.fill(Path(roundedRect: bar.insetBy(dx: -thickness * 1.4, dy: -thickness * 1.4),
+                       cornerRadius: thickness * 2),
+                  with: .color(color.opacity(0.22)))
+        context.fill(Path(roundedRect: bar, cornerRadius: thickness / 2), with: .color(color))
+        context.fill(Path(roundedRect: bar.insetBy(dx: thickness * 0.3, dy: thickness * 0.3),
+                          cornerRadius: thickness / 2),
+                     with: .color(.white.opacity(0.55)))
+    }
+
+    /// A stable pseudo-random value in 0..<1, so the star field and planet
+    /// surface are identical on every frame.
+    private func random(_ index: Int, _ salt: Int) -> CGFloat {
+        var x = UInt64(truncatingIfNeeded: index &* 7919 &+ salt &* 104_729 &+ 1)
+        x ^= x >> 33
+        x &*= 0xff51afd7ed558ccd
+        x ^= x >> 33
+        x &*= 0xc4ceb9fe1a85ec53
+        x ^= x >> 33
+        return CGFloat(x % 10_000) / 10_000
+    }
+
+    private func wrap(_ value: CGFloat) -> CGFloat {
+        let remainder = value.truncatingRemainder(dividingBy: 1)
+        return remainder < 0 ? remainder + 1 : remainder
     }
 }
