@@ -143,6 +143,12 @@ struct SpaceLionPlayfield: View {
                               lionSize: CGFloat) -> some View {
         let isSelected = selectedOptionID == option.id
         let showsFeedback = isSelected && buttonHasContact
+        let feedback: HoopFeedback = {
+            guard showsFeedback else { return .none }
+            return selectedWasCorrect ? .correct : .wrong
+        }()
+        // Depress the arcade cap while the lion is pressing into it.
+        let isPressed = isSelected && (buttonHasContact || buttonImpactScale < 0.98)
         return Button {
             select(option,
                    at: point,
@@ -150,33 +156,13 @@ struct SpaceLionPlayfield: View {
                    buttonSize: size,
                    lionSize: lionSize)
         } label: {
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(colors: [.white.opacity(0.32),
-                                                character.color.opacity(0.95),
-                                                character.deepColor],
-                                       center: .topLeading,
-                                       startRadius: 1,
-                                       endRadius: size * 0.72)
-                    )
-                Circle()
-                    .stroke(showsFeedback ? (selectedWasCorrect ? Color.green : Color.red) : .white,
-                            lineWidth: showsFeedback ? 5 : 2.5)
-                Circle()
-                    .stroke(character.tintColor.opacity(0.75), lineWidth: 1)
-                    .padding(6)
-                Text(option.text)
-                    .font(.system(size: size * 0.34, weight: .black, design: .rounded))
-                    .minimumScaleFactor(0.42)
-                    .lineLimit(1)
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.45), radius: 2, y: 1)
-                    .padding(size * 0.12)
-            }
-            .frame(width: size, height: size)
-            .shadow(color: character.color.opacity(0.55), radius: showsFeedback ? 14 : 8)
-            .scaleEffect(isSelected ? buttonImpactScale : 1)
+            AnswerHoop(text: option.text,
+                       tint: character.color,
+                       size: size,
+                       textScale: 1,
+                       feedback: feedback,
+                       isPressed: isPressed)
+                .scaleEffect(isSelected ? buttonImpactScale : 1)
         }
         .buttonStyle(.plain)
         .position(point)
@@ -353,6 +339,7 @@ struct SpaceLionPlayfield: View {
         motionPhase = .contact
         phaseStarted = Date()
         buttonHasContact = true
+        AppAudio.shared.playButtonPress()
         let accepted = onHit(option.id, false, false)
         if accepted { onSwallow(option.isCorrect) }
 
@@ -539,20 +526,26 @@ private extension SpaceLionPlayfield {
         var questionY: CGFloat { max(34, topReserve * 0.52) }
         var questionFontSize: CGFloat { isPad ? 38 : max(24, size.height * 0.058) }
 
+        /// Eight seats on the screen rim. Centres sit just inside the edge so
+        /// the authored button canvases' visible metal housing meets the rim.
         var answerPoints: [CGPoint] {
-            let sideX = answerSize * 0.68
-            let upperY = max(topReserve + answerSize * 0.58, size.height * 0.23)
-            let lowerY = min(size.height - bottomReserve - answerSize * 0.68,
-                             size.height * 0.88)
+            let inset = answerSize * 0.47
+            let topY = max(topReserve + answerSize * 0.48, inset)
+            let bottomY = min(size.height - bottomReserve - answerSize * 0.48,
+                              size.height - inset)
+            let upperSideY = size.height * 0.40
+            let lowerSideY = size.height * 0.68
+            let topXLeft = size.width * 0.32
+            let topXRight = size.width * 0.68
             return [
-                CGPoint(x: size.width * 0.30, y: upperY),
-                CGPoint(x: size.width * 0.70, y: upperY),
-                CGPoint(x: sideX, y: size.height * 0.40),
-                CGPoint(x: size.width - sideX, y: size.height * 0.40),
-                CGPoint(x: sideX, y: size.height * 0.68),
-                CGPoint(x: size.width - sideX, y: size.height * 0.68),
-                CGPoint(x: size.width * 0.30, y: lowerY),
-                CGPoint(x: size.width * 0.70, y: lowerY)
+                CGPoint(x: topXLeft, y: topY),
+                CGPoint(x: topXRight, y: topY),
+                CGPoint(x: size.width - inset, y: upperSideY),
+                CGPoint(x: size.width - inset, y: lowerSideY),
+                CGPoint(x: topXRight, y: bottomY),
+                CGPoint(x: topXLeft, y: bottomY),
+                CGPoint(x: inset, y: lowerSideY),
+                CGPoint(x: inset, y: upperSideY)
             ]
         }
     }
