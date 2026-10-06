@@ -123,7 +123,9 @@ final class AppAudio: NSObject, ObservableObject {
         Effect(key: "cardTotal",     file: "score_increase_main", ext: "caf", volume: 0.094, lead: 0.0),
         Effect(key: "select",        file: "sfx_select",         ext: "caf", volume: 0.17, lead: 0.0),
         Effect(key: "switchOn",      file: "sfx_switch_on",      ext: "caf", volume: 0.89, lead: 0.200),
-        Effect(key: "switchOff",     file: "sfx_switch_off",     ext: "caf", volume: 1.0,  lead: 0.170)
+        Effect(key: "switchOff",     file: "sfx_switch_off",     ext: "caf", volume: 1.0,  lead: 0.170),
+        // Physical answer-button press — same cue as the Nuts & Numbers grab.
+        Effect(key: "buttonPress",   file: "sfx_button_press",   ext: "caf", volume: 0.31, lead: 0.0)
     ]
 
     /// True while a level is actually being played (not the menu, the intro/
@@ -529,6 +531,7 @@ final class AppAudio: NSObject, ObservableObject {
 
     func playMenuTap()          { playEffect("select") }
     func playSwitch(on: Bool)   { playEffect(on ? "switchOn" : "switchOff") }
+    func playButtonPress()      { playEffect("buttonPress") }     // arcade answer cap presses in
 
     private func playEffect(_ key: String) {
         guard gameSoundsEnabled else { return }

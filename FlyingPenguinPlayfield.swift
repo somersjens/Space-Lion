@@ -81,6 +81,9 @@ struct FlyingPenguinPlayfield: View {
     @State private var pressHoldSequence = 0
     @State private var directPressActive = false
     @State private var suppressTapAfterPressHold = false
+    /// Which answer button is visually depressed, matching the Nuts & Numbers
+    /// grab-cap travel. Cleared automatically after the press settles.
+    @State private var pressedOptionID: UUID?
     @State private var penguinX: CGFloat = 0
     @State private var hoopX: CGFloat = 0
     @State private var shownOptions: [AnswerOption] = []
@@ -166,12 +169,19 @@ struct FlyingPenguinPlayfield: View {
     // Retain a small tablet lift without letting it crowd the sum and water.
     private var penguinSize: CGFloat { sceneSize.height * (isPad ? 0.245 : 0.235) }
     /// The rings leave a dedicated header band for the moving sum.
-    /// Three touching hoops fill the complete answer column. Their shared size
-    /// is derived from the available height, so there is no traversable gap.
+    /// Three touching arcade buttons fill the complete answer column, flush
+    /// against the trailing screen edge. Their shared size is derived from the
+    /// available height, so there is no gap between neighbours or the rim.
     private var hoopSize: CGFloat {
         let questionBottom = sceneSize.height * 0.141
         let answerBottom = waterline - sceneSize.height * 0.012
         return max(1, (answerBottom - questionBottom) / 3)
+    }
+    /// Centre X that parks every answer button flush against the trailing
+    /// edge. A small inset past half-width compensates for the transparent
+    /// margin in the authored canvases without clipping the visible rim away.
+    private var answerButtonX: CGFloat {
+        sceneSize.width - hoopSize * 0.47
     }
     private var waterline: CGFloat { sceneSize.height * 0.90 }
     private var normalPenguinX: CGFloat { sceneSize.width * 0.25 }
@@ -191,10 +201,9 @@ struct FlyingPenguinPlayfield: View {
 
     private var questionY: CGFloat { sceneSize.height * 0.090 }
     private var ringSpawnX: CGFloat {
-        // Fully beyond the trailing edge, so a set always slides into frame
-        // rather than appearing with its rim already inside it. The first set
-        // is put on the conveyor at the moment of the shot and covers most of
-        // this distance during the launch itself.
+        // The timing gate still approaches from just beyond the answer column
+        // so turbo windows and passage resolution keep their familiar runway,
+        // while the buttons themselves stay parked on the trailing edge.
         sceneSize.width + hoopSize * 0.55
     }
     private var ringSetSpacing: CGFloat {
@@ -262,29 +271,28 @@ struct FlyingPenguinPlayfield: View {
                                         character: character,
                                         isPad: isPad)
                         .position(x: set.x, y: questionY)
+                    // Spent answer buttons drift inward from the edge column so
+                    // the next set can occupy the flush rim without overlap.
                     ForEach(Array(set.options.enumerated()), id: \.element.id) { index, option in
                         AnswerHoop(text: option.text,
                                    tint: character.color,
                                    size: hoopSize,
                                    textScale: answerTextScale(for: set.options),
-                                   feedback: set.feedback(for: option.id))
+                                   feedback: set.feedback(for: option.id),
+                                   isPressed: false)
                             .position(x: set.x, y: lanes[index])
+                            .opacity(0.72)
                     }
                 }
 
                 if !previewOptions.isEmpty && entranceStage >= 3 && !completionActive {
+                    // Only the upcoming sum peeks in from the conveyor. The
+                    // answer buttons themselves always live on the trailing
+                    // edge, so a second column would sit off-screen.
                     MovingQuestionBadge(prompt: previewPrompt,
                                         character: character,
                                         isPad: isPad)
                         .position(x: previewX, y: questionY)
-                    ForEach(Array(previewOptions.enumerated()), id: \.element.id) { index, option in
-                        AnswerHoop(text: option.text,
-                                   tint: character.color,
-                                   size: hoopSize,
-                                   textScale: answerTextScale(for: previewOptions),
-                                   feedback: .none)
-                            .position(x: previewX, y: lanes[index])
-                    }
                 }
 
                 if !shownOptions.isEmpty && entranceStage >= 3 && !completionActive {
@@ -297,8 +305,9 @@ struct FlyingPenguinPlayfield: View {
                                    tint: character.color,
                                    size: hoopSize,
                                    textScale: answerTextScale(for: shownOptions),
-                                   feedback: feedback(for: option.id))
-                            .position(x: hoopX, y: lanes[index])
+                                   feedback: feedback(for: option.id),
+                                   isPressed: pressedOptionID == option.id)
+                            .position(x: answerButtonX, y: lanes[index])
                     }
                 }
 
@@ -388,17 +397,17 @@ struct FlyingPenguinPlayfield: View {
                         .allowsHitTesting(false)
                 }
 
-                // The tap hint sits above the hoop it is asking for, so "tap the
-                // right hoop" has something to point at. It goes out the moment
-                // the deadline is missed, because from there the tap is no
-                // longer the one being taught.
+                // The tap hint sits on the edge button it is asking for, so
+                // "tap the right answer" has something to point at. It goes out
+                // the moment the deadline is missed, because from there the tap
+                // is no longer the one being taught.
                 if tutorial.highlightsTurbo, !resolved, entranceStage >= 5,
                    let index = correctHoopIndex,
                    timingMarkerX(for: hoopX) > penguinX {
                     TutorialTapPulse(size: hoopSize * 0.86,
                                      tint: character.deepColor,
                                      reduceMotion: reduceMotion)
-                        .position(x: hoopX, y: lanes[index])
+                        .position(x: answerButtonX, y: lanes[index])
                         .allowsHitTesting(false)
                 }
 
@@ -756,7 +765,7 @@ struct FlyingPenguinPlayfield: View {
     private func beginPressHold(at location: CGPoint) {
         pressHoldSequence += 1
         let sequence = pressHoldSequence
-        guard location.x < hoopX - hoopSize * 0.72 else { return }
+        guard location.x < answerButtonX - hoopSize * 0.72 else { return }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
             guard pressHoldSequence == sequence, dragStartY != nil,
@@ -773,15 +782,26 @@ struct FlyingPenguinPlayfield: View {
 
     private func handlePlayfieldTap(at location: CGPoint) {
         guard !directPressActive, !suppressTapAfterPressHold else { return }
-        // Tapping at or beyond the active hoops keeps the existing turbo lane
-        // selection. Everywhere before that zone is direct, unboosted height
-        // control: the penguin smoothly flies to the tapped vertical position.
-        // With no set on the conveyor at all — the two movement lessons — every
-        // tap is a height tap, wherever the retired hoops happen to stand.
-        if !shownOptions.isEmpty, location.x >= hoopX - hoopSize * 0.72 {
+        // Tapping the flush answer column presses a real button and steers the
+        // penguin into that lane. Everywhere left of that rim is direct height
+        // control. With no set on offer — the two movement lessons — every tap
+        // is a height tap.
+        if !shownOptions.isEmpty, location.x >= answerButtonX - hoopSize * 0.72 {
             handleRingTap(at: location)
         } else {
             handleHeightTap(at: location)
+        }
+    }
+
+    /// Depress the arcade cap and play the shared press cue, then let it
+    /// spring back on the same schedule as Nuts & Numbers' grab button.
+    private func pressAnswerButton(_ optionID: UUID) {
+        AppAudio.shared.playButtonPress()
+        pressedOptionID = optionID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+            if pressedOptionID == optionID {
+                pressedOptionID = nil
+            }
         }
     }
 
@@ -848,7 +868,7 @@ struct FlyingPenguinPlayfield: View {
     private func handleRingTap(at location: CGPoint) {
         guard isLive, isRunning, entranceStage >= 5, !resolved,
               committedLaneIndex == nil,
-              location.x >= hoopX - hoopSize * 0.72 else { return }
+              location.x >= answerButtonX - hoopSize * 0.72 else { return }
 
         if location.y > lanes[2] + hoopSize * 0.46 {
             // The held set is waiting for one specific tap; nothing else — a
@@ -865,13 +885,17 @@ struct FlyingPenguinPlayfield: View {
         let lane = lanes.enumerated().min {
             abs($0.element - location.y) < abs($1.element - location.y)
         }?.offset ?? 1
-        // While the turbo lesson holds the world still, only the hoop it is
-        // pointing at releases it. Anything else leaves the set standing.
+        // While the turbo lesson holds the world still, only the button it is
+        // pointing at releases it. Anything else leaves the column standing.
         if lane == correctHoopIndex {
             tutorialTurboTapped = true
             tutorialHold = false
         } else if tutorialHold {
             return
+        }
+
+        if lane < shownOptions.count {
+            pressAnswerButton(shownOptions[lane].id)
         }
 
         dragStartY = nil
@@ -904,14 +928,14 @@ struct FlyingPenguinPlayfield: View {
         shownOptions.firstIndex { $0.isCorrect }
     }
 
-    /// The answer capsule has a fixed safe width inside the hoop. Its font
-    /// scale is calculated from the widest option and then shared by all three
-    /// answers, so a longer fraction never bursts its hoop or makes one lane
-    /// look arbitrarily smaller than the other two.
+    /// The number on the arcade cap has a fixed safe width. Its font scale is
+    /// calculated from the widest option and then shared by all three answers,
+    /// so a longer fraction never bursts its face or makes one lane look
+    /// arbitrarily smaller than the other two.
     private func answerTextScale(for options: [AnswerOption]) -> CGFloat {
         guard hoopSize > 0, !options.isEmpty else { return 1 }
-        let baseSize = hoopSize * 0.29
-        let availableWidth = hoopSize * 0.62
+        let baseSize = hoopSize * 0.28
+        let availableWidth = hoopSize * 0.56
 
 #if canImport(UIKit)
         let baseFont = UIFont.systemFont(ofSize: baseSize, weight: .heavy)
@@ -931,9 +955,9 @@ struct FlyingPenguinPlayfield: View {
 #endif
     }
 
-    /// Where a held set comes to a stop: fully in frame, and still comfortably
-    /// on the near side of its own deadline, so the tap that releases it is the
-    /// early tap the lesson is asking for.
+    /// Where a held timing gate comes to a stop: still comfortably on the near
+    /// side of its own deadline, so the tap on the flush edge button that
+    /// releases it is the early tap the lesson is asking for.
     private var tutorialHoldX: CGFloat { sceneSize.width * 0.78 }
 
     private var displayedPenguinX: CGFloat {
@@ -973,51 +997,23 @@ struct FlyingPenguinPlayfield: View {
         }
     }
 
+    /// Solid arcade buttons have no near-side rim to composite over the
+    /// character. The flush edge column already reads in front of the water.
     @ViewBuilder private var hoopForegrounds: some View {
-        ForEach(retiringSets) { set in
-            if abs(set.x - penguinX) < hoopSize * 1.15 {
-                ForEach(Array(set.options.enumerated()), id: \.element.id) { index, option in
-                    AnswerHoopForeground(tint: character.color,
-                                         size: hoopSize,
-                                         feedback: set.feedback(for: option.id))
-                        .position(x: set.x, y: lanes[index])
-                        .opacity(hoopOcclusionOpacity(at: set.x))
-                }
-            }
-        }
-        if !shownOptions.isEmpty && entranceStage >= 3 && !completionActive,
-           abs(hoopX - penguinX) < hoopSize * 1.15 {
-            ForEach(Array(shownOptions.enumerated()), id: \.element.id) { index, option in
-                AnswerHoopForeground(tint: character.color,
-                                     size: hoopSize,
-                                     feedback: feedback(for: option.id))
-                    .position(x: hoopX, y: lanes[index])
-                    .opacity(hoopOcclusionOpacity(at: hoopX))
-            }
-        }
+        EmptyView()
     }
 
     /// The warning belongs to the two wrong answers themselves. Keeping it on
-    /// the right/near rim makes it legible both before and during a passage.
+    /// the outer rim of the edge buttons makes it legible before a passage.
     @ViewBuilder private var tutorialWrongHoopMarkers: some View {
         if tutorial.marksWrongHoops, entranceStage >= 3, !completionActive {
-            ForEach(Array(previewOptions.enumerated()), id: \.element.id) { index, option in
-                if !option.isCorrect {
-                    BrokenHeartHoopMarker(size: hoopSize * 0.30,
-                                          tint: character.deepColor,
-                                          reduceMotion: reduceMotion)
-                        .position(x: previewX + hoopSize * 0.49,
-                                  y: lanes[index])
-                }
-            }
-
             if !resolved {
                 ForEach(Array(shownOptions.enumerated()), id: \.element.id) { index, option in
                     if !option.isCorrect {
                         BrokenHeartHoopMarker(size: hoopSize * 0.30,
                                               tint: character.deepColor,
                                               reduceMotion: reduceMotion)
-                            .position(x: hoopX + hoopSize * 0.49,
+                            .position(x: answerButtonX + hoopSize * 0.28,
                                       y: lanes[index])
                     }
                 }
@@ -1510,6 +1506,9 @@ struct FlyingPenguinPlayfield: View {
         }
         selectedOptionID = isBelowRings ? nil : selected.id
         bypassedWrongSet = isBelowRings && noCorrectAnswer && isCorrect
+        if !isBelowRings {
+            pressAnswerButton(selected.id)
+        }
         if usesSpeedBonus {
             withAnimation(.easeInOut(duration: 0.20)) { bonusOptionID = selected.id }
         }
@@ -1682,9 +1681,11 @@ struct FlyingPenguinPlayfield: View {
         let feedbacks = Dictionary(uniqueKeysWithValues: shownOptions.map {
             ($0.id, feedback(for: $0.id))
         })
+        // Retire from the flush edge column so spent buttons drift inward
+        // instead of appearing mid-air where the timing gate happens to stand.
         return RetiringHoopSet(options: shownOptions,
                                prompt: shownPrompt,
-                               x: hoopX,
+                               x: answerButtonX,
                                feedbacks: feedbacks)
     }
 }
@@ -2608,121 +2609,113 @@ private struct SolvedAnswerEchoView: View {
     }
 }
 
+/// Physical arcade answer button — same layered housing / cap / lip press as
+/// the Nuts & Numbers grab control, with the answer number centred on the face
+/// instead of a word.
 struct AnswerHoop: View {
     let text: String
     let tint: Color
     let size: CGFloat
     let textScale: CGFloat
     let feedback: HoopFeedback
+    var isPressed: Bool = false
 
-    private var feedbackGradient: AngularGradient {
+    private enum Art {
+        static let canvas: CGFloat = 1254
+        /// Cap travel into the housing, in canvas pixels.
+        static let pressTravel: CGFloat = 88
+        /// Optical centre of the red top face on the perspective canvas. Matches
+        /// the Nuts & Numbers grab label seam so a digit reads as sitting in
+        /// the middle of the button, not low in the housing.
+        static let labelCenterY: CGFloat = 470 / 1254
+    }
+
+    private var travel: CGFloat { size * (Art.pressTravel / Art.canvas) }
+    private var faceOffset: CGFloat { size * (Art.labelCenterY - 0.5) }
+
+    private var feedbackTint: Color? {
         switch feedback {
         case .correct, .revealedCorrect, .bonus:
-            return AngularGradient(colors: [
-                Color(red: 0.12, green: 0.78, blue: 0.36),
-                Color(red: 0.57, green: 0.94, blue: 0.39),
-                Color(red: 0.04, green: 0.62, blue: 0.39),
-                Color(red: 0.12, green: 0.78, blue: 0.36)
-            ], center: .center)
+            return Color(red: 0.12, green: 0.78, blue: 0.36)
         case .wrong:
-            return AngularGradient(colors: [
-                Color(red: 0.96, green: 0.22, blue: 0.30),
-                Color(red: 1.00, green: 0.48, blue: 0.28),
-                Color(red: 0.82, green: 0.12, blue: 0.38),
-                Color(red: 0.96, green: 0.22, blue: 0.30)
-            ], center: .center)
+            return Color(red: 0.96, green: 0.22, blue: 0.30)
         case .bypassed:
-            return AngularGradient(colors: [
-                Color.white.opacity(0.82), Color.cyan.opacity(0.72),
-                Color.blue.opacity(0.45), Color.white.opacity(0.82)
-            ], center: .center)
+            return Color.cyan.opacity(0.85)
         case .none, .inactive:
-            return AngularGradient(colors: [.clear, .clear], center: .center)
+            return nil
         }
     }
 
-    private var showsResolvedRim: Bool { feedback != .none && feedback != .inactive }
-
     var body: some View {
+        let accent = feedbackTint ?? tint
         ZStack {
-            Circle()
-                .strokeBorder(tint, lineWidth: size * 0.13)
-                .opacity(feedback == .none ? 1 : (feedback == .inactive ? 0.42 : 0.16))
-
-            Circle()
-                .trim(from: 0.54, to: 0.92)
-                .stroke(.white.opacity(0.68),
-                        style: StrokeStyle(lineWidth: size * 0.035, lineCap: .round))
-                .padding(size * 0.035)
-                .opacity(feedback == .none ? 1 : (feedback == .inactive ? 0.38 : 0.24))
-
-            Circle()
-                .strokeBorder(feedbackGradient, lineWidth: size * 0.13)
-                .opacity(showsResolvedRim ? 1 : 0)
-                .scaleEffect(showsResolvedRim ? 1 : 0.975)
-
-            if feedback == .correct || feedback == .revealedCorrect || feedback == .wrong || feedback == .bonus {
-                FeedbackRimSweep(size: size, feedback: feedback)
+            ZStack {
+                Image("button3")
+                    .resizable()
+                    .interpolation(.high)
+                Image("button3")
+                    .renderingMode(.template)
+                    .resizable()
+                    .interpolation(.high)
+                    .foregroundStyle(accent.opacity(feedback == .inactive ? 0.18 : 0.38))
+                    .blendMode(.color)
             }
+            .compositingGroup()
+            .opacity(feedback == .inactive ? 0.55 : 1)
+            .shadow(color: accent.opacity(0.34), radius: size * 0.06)
 
-            if feedback == .bonus {
-                BonusStarBurst(size: size)
-            }
-
-            Circle().strokeBorder(.white.opacity(0.75), lineWidth: 2)
-                .padding(size * 0.09)
-            Text(text)
-                .font(.system(size: size * 0.29 * textScale,
-                              weight: .black,
-                              design: .rounded))
-                .foregroundStyle(Color(red: 0.04, green: 0.16, blue: 0.38))
-                .lineLimit(1)
-                // The fixed frame gives `minimumScaleFactor` an actual width
-                // to fit into. Without it, a long label sizes its capsule
-                // first and can paint over the hoop's inner opening.
-                .minimumScaleFactor(0.40)
-                .allowsTightening(true)
-                .frame(width: size * 0.62, height: size * 0.40)
-                .background(.white.opacity(0.94), in: Capsule())
-        }
-        .frame(width: size, height: size)
-        .animation(.easeInOut(duration: 0.28), value: feedback)
-        .drawingGroup(opaque: false, colorMode: .nonLinear)
-    }
-}
-
-/// One compact glint makes a complete lap around a resolved rim. It animates
-/// only once, keeping the result lively without leaving a permanent spinner.
-private struct FeedbackRimSweep: View {
-    let size: CGFloat
-    let feedback: HoopFeedback
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var rotation: Double = 0
-
-    var body: some View {
-        Circle()
-            .trim(from: 0.02, to: 0.24)
-            .stroke(
-                AngularGradient(colors: [.white.opacity(0.02), .white.opacity(0.96),
-                                         sweepTint.opacity(0.70), .white.opacity(0.02)],
-                                center: .center),
-                style: StrokeStyle(lineWidth: size * 0.045, lineCap: .round)
-            )
-            .padding(size * 0.055)
-            .rotationEffect(.degrees(rotation))
-            .onAppear {
-                rotation = 0
-                if reduceMotion {
-                    rotation = 360
-                } else {
-                    withAnimation(.easeInOut(duration: 0.42)) { rotation = 360 }
+            ZStack {
+                Image("button2")
+                    .resizable()
+                    .interpolation(.high)
+                if let feedbackTint {
+                    Image("button2")
+                        .renderingMode(.template)
+                        .resizable()
+                        .interpolation(.high)
+                        .foregroundStyle(feedbackTint.opacity(0.55))
+                        .blendMode(.color)
+                }
+                Text(text)
+                    .font(.system(size: size * 0.28 * textScale,
+                                  weight: .black,
+                                  design: .rounded))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.45), radius: 1, y: 1)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.32)
+                    .allowsTightening(true)
+                    .multilineTextAlignment(.center)
+                    .frame(width: size * 0.56, height: size * 0.34, alignment: .center)
+                    // Sit on the red top-face centre (perspective art), not the
+                    // square canvas mid-point — that mid-point reads too low.
+                    .offset(y: faceOffset)
+                if feedback == .bonus {
+                    BonusStarBurst(size: size * 0.85)
+                        .offset(y: faceOffset)
                 }
             }
-            .allowsHitTesting(false)
-    }
+            .offset(y: isPressed ? travel : 0)
 
-    private var sweepTint: Color {
-        feedback == .wrong ? .orange : .mint
+            ZStack {
+                Image("button1")
+                    .resizable()
+                    .interpolation(.high)
+                Image("button1")
+                    .renderingMode(.template)
+                    .resizable()
+                    .interpolation(.high)
+                    .foregroundStyle(accent.opacity(feedback == .inactive ? 0.14 : 0.30))
+                    .blendMode(.color)
+            }
+            .compositingGroup()
+            .opacity(feedback == .inactive ? 0.55 : 1)
+        }
+        .frame(width: size, height: size)
+        .contentShape(Circle())
+        .animation(isPressed ? .easeIn(duration: 0.08) : .easeOut(duration: 0.24),
+                   value: isPressed)
+        .animation(.easeInOut(duration: 0.28), value: feedback)
     }
 }
 
@@ -2754,80 +2747,5 @@ private struct BonusStarBurst: View {
             withAnimation(.easeOut(duration: 0.48)) { progress = 1 }
         }
         .allowsHitTesting(false)
-    }
-}
-
-/// Near-side right arc of a hoop. It deliberately has no label or fill: those
-/// stay on the back layer and remain readable while the penguin crosses it.
-struct AnswerHoopForeground: View {
-    let tint: Color
-    let size: CGFloat
-    let feedback: HoopFeedback
-
-    private var feedbackGradient: AngularGradient {
-        switch feedback {
-        case .correct, .revealedCorrect, .bonus:
-            return AngularGradient(colors: [.green, .mint, Color(red: 0.04, green: 0.62, blue: 0.39), .green],
-                                   center: .center)
-        case .wrong:
-            return AngularGradient(colors: [.red, .orange, Color(red: 0.82, green: 0.12, blue: 0.38), .red],
-                                   center: .center)
-        case .bypassed:
-            return AngularGradient(colors: [.white.opacity(0.82), .cyan.opacity(0.72),
-                                             .blue.opacity(0.45), .white.opacity(0.82)],
-                                   center: .center)
-        case .none, .inactive:
-            return AngularGradient(colors: [.clear, .clear], center: .center)
-        }
-    }
-
-    private var showsResolvedRim: Bool { feedback != .none && feedback != .inactive }
-
-    var body: some View {
-        ZStack {
-            RightHalfHoopStroke(color: tint,
-                                size: size,
-                                lineWidth: size * 0.13)
-                .opacity(feedback == .none ? 1 : (feedback == .inactive ? 0.42 : 0.18))
-
-            Circle()
-                .strokeBorder(feedbackGradient, lineWidth: size * 0.13)
-                .mask {
-                    Rectangle()
-                        .frame(width: size * 0.5)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-                .opacity(showsResolvedRim ? 1 : 0)
-                .scaleEffect(showsResolvedRim ? 1 : 0.975)
-
-            RightHalfHoopStroke(color: .white.opacity(0.78),
-                                size: size,
-                                lineWidth: 2,
-                                inset: size * 0.09)
-        }
-        .frame(width: size, height: size)
-        .animation(.easeInOut(duration: 0.28), value: feedback)
-        .allowsHitTesting(false)
-    }
-}
-
-/// The right semicircle is the near side of the hoop. The complete hoop is
-/// rendered behind the penguin; this masked duplicate alone is rendered above.
-private struct RightHalfHoopStroke: View {
-    let color: Color
-    let size: CGFloat
-    let lineWidth: CGFloat
-    var inset: CGFloat = 0
-
-    var body: some View {
-        Circle()
-            .strokeBorder(color, lineWidth: lineWidth)
-            .padding(inset)
-            .mask {
-                Rectangle()
-                    .frame(width: size * 0.5)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .frame(width: size, height: size)
     }
 }

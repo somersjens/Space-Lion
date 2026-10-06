@@ -29058,7 +29058,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You can collect up to **%lld hoops** in this level."
+            "value" : "You can collect up to **%lld answers** in this level."
           }
         },
         "es" : {
@@ -29274,7 +29274,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Je kunt in dit level maximaal **%lld hoepels** verzamelen."
+            "value" : "Je kunt in dit level maximaal **%lld antwoorden** verzamelen."
           }
         },
         "or" : {
@@ -96679,7 +96679,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Can’t see the right answer? Dive underneath the hoops!"
+            "value" : "Can’t see the right answer? Dive underneath the buttons!"
           }
         },
         "es" : {
@@ -96895,7 +96895,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Zie je het goede antwoord niet? Duik dan onder de hoepels door!"
+            "value" : "Zie je het goede antwoord niet? Duik dan onder de knoppen door!"
           }
         },
         "or" : {
@@ -97146,7 +97146,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Quickly solve the sum above the hoops! Fly through the correct answer and score 1 point."
+            "value" : "Quickly solve the sum above the buttons! Fly to the correct answer and score 1 point."
           }
         },
         "es" : {
@@ -97362,7 +97362,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Reken snel de som boven de hoepels uit! Vlieg door het goede antwoord en pak 1 punt."
+            "value" : "Reken snel de som boven de knoppen uit! Vlieg naar het goede antwoord en pak 1 punt."
           }
         },
         "or" : {
@@ -97613,7 +97613,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Know the answer already? Tap the correct hoop for TURBO! Tap before the cone to score 2 points."
+            "value" : "Know the answer already? Tap the correct button for TURBO! Tap before the cone to score 2 points."
           }
         },
         "es" : {
@@ -97829,7 +97829,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Weet je het antwoord al? Tik op de juiste hoepel voor TURBO! Tik vóór de pion en pak 2 punten."
+            "value" : "Weet je het antwoord al? Tik op de juiste knop voor TURBO! Tik vóór de pion en pak 2 punten."
           }
         },
         "or" : {
@@ -98080,7 +98080,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Watch out! Fly through the wrong hoop and you’ll lose a life."
+            "value" : "Watch out! Fly to the wrong button and you’ll lose a life."
           }
         },
         "es" : {
@@ -98296,7 +98296,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Pas op! Vlieg je door een verkeerde hoepel, dan verlies je een leven."
+            "value" : "Pas op! Vlieg je naar een verkeerde knop, dan verlies je een leven."
           }
         },
         "or" : {

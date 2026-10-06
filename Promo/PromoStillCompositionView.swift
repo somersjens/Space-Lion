@@ -67,16 +67,20 @@ private struct PromoGameplayStill: View {
         let first = outputSize.height * 0.141 + hoopSize * 0.5
         return [first, first + hoopSize, first + hoopSize * 2]
     }
+    /// Timing / question anchor kept mid-right so the marketing composition
+    /// still has breathing room left of the flush answer column.
     private var hoopX: CGFloat { outputSize.width * (isPadCanvas ? 0.69 : 0.71) }
+    /// Answer buttons sit flush against the trailing edge.
+    private var answerButtonX: CGFloat { outputSize.width - hoopSize * 0.47 }
     private var playerX: CGFloat {
         if kind == .turbo {
             // The gameplay anchor sits directly below the marketing capsule,
             // leaving the complete answer stack readable on the right.
             return outputSize.width * 0.29
         }
-        // Keep a full, obvious control gap before the bottom hoop. The brief
+        // Keep a full, obvious control gap before the bottom button. The brief
         // asks for roughly another fifth of the complete screen width here.
-        return hoopX - hoopSize * 0.78 - outputSize.width * 0.20
+        return answerButtonX - hoopSize * 0.78 - outputSize.width * 0.20
     }
     private var playerY: CGFloat { kind == .turbo ? lanes[1] : lanes[2] }
     private var worldOffset: CGFloat { -outputSize.width * 0.22 }
@@ -103,10 +107,6 @@ private struct PromoGameplayStill: View {
                           flightClock: 0.68)
                 .position(x: playerX, y: playerY)
                 .shadow(color: .black.opacity(0.18), radius: playerSize * 0.035, y: playerSize * 0.022)
-
-            if abs(hoopX - playerX) < hoopSize * 1.15 {
-                hoopForegroundColumn
-            }
 
             worldFront
             headline
@@ -193,23 +193,9 @@ private struct PromoGameplayStill: View {
                            tint: penguin.color,
                            size: hoopSize,
                            textScale: 1,
-                           feedback: .none)
-                    .position(x: hoopX, y: lanes[index])
-            }
-        }
-    }
-
-    private var hoopForegroundColumn: some View {
-        let distance = abs(hoopX - playerX)
-        let opacity = min(1, max(0,
-            (hoopSize * 1.15 - distance) / (hoopSize * (1.15 - 0.82))))
-        return ZStack {
-            ForEach(0..<3, id: \.self) { index in
-                AnswerHoopForeground(tint: penguin.color,
-                                     size: hoopSize,
-                                     feedback: .none)
-                    .position(x: hoopX, y: lanes[index])
-                    .opacity(opacity)
+                           feedback: .none,
+                           isPressed: kind == .turbo && index == 1)
+                    .position(x: answerButtonX, y: lanes[index])
             }
         }
     }
