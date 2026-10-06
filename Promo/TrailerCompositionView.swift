@@ -545,10 +545,14 @@ struct TrailerCompositionView: View {
             .shadow(color: .black.opacity(0.12), radius: fontSize * 0.12, y: fontSize * 0.06)
     }
 
+    private var answerButtonX: CGFloat { outputSize.width - hoopSize * 0.42 }
+
     private func hoopColumn(texts: [String],
                             character: AnimalCharacter,
-                            centreX: CGFloat,
+                            centreX _: CGFloat,
                             feedbackIndex: Int?) -> some View {
+        // Answers always occupy the flush trailing-edge column. The moving
+        // centre is kept at call sites for the question badge / sparkles.
         ZStack {
             ForEach(Array(texts.enumerated()), id: \.offset) { index, text in
                 let feedback: HoopFeedback = feedbackIndex == index
@@ -558,32 +562,21 @@ struct TrailerCompositionView: View {
                            tint: character.color,
                            size: hoopSize,
                            textScale: 1,
-                           feedback: feedback)
-                    .position(x: centreX, y: lanes[index])
+                           feedback: feedback,
+                           isPressed: feedbackIndex == index)
+                    .position(x: answerButtonX, y: lanes[index])
             }
         }
     }
 
     @ViewBuilder
-    private func hoopForegroundColumn(character: AnimalCharacter,
-                                      centreX: CGFloat,
-                                      playerX: CGFloat,
-                                      feedbackIndex: Int?) -> some View {
-        let distance = abs(centreX - playerX)
-        if distance < hoopSize * 1.15 {
-            let opacity = min(1, max(0,
-                (hoopSize * 1.15 - distance) / (hoopSize * (1.15 - 0.82))))
-            ForEach(0..<3, id: \.self) { index in
-                let feedback: HoopFeedback = feedbackIndex == index
-                    ? .correct
-                    : (feedbackIndex == nil ? .none : .inactive)
-                AnswerHoopForeground(tint: character.color,
-                                     size: hoopSize,
-                                     feedback: feedback)
-                    .position(x: centreX, y: lanes[index])
-                    .opacity(opacity)
-            }
-        }
+    private func hoopForegroundColumn(character _: AnimalCharacter,
+                                      centreX _: CGFloat,
+                                      playerX _: CGFloat,
+                                      feedbackIndex _: Int?) -> some View {
+        // Solid arcade buttons have no near-side rim to composite over the
+        // character; the edge column already reads above the water.
+        EmptyView()
     }
 
     private func riggedCharacter(_ animal: AnimalCharacter,

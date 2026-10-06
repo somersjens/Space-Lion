@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1B2C3D53074D18500BC6413 /* sfx_button_press.caf in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D43074D18500BC6413 /* sfx_button_press.caf */; };
 		F940050C3074D18500BC6413 /* sfx_double_card.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94004F53074D18500BC6413 /* sfx_double_card.caf */; };
 		F940050D3074D18500BC6413 /* translations.py in Resources */ = {isa = PBXBuildFile; fileRef = F94005083074D18500BC6413 /* translations.py */; };
 		F940050E3074D18500BC6413 /* sfx_turbo.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F94005013074D18500BC6413 /* sfx_turbo.m4a */; };
@@ -136,6 +137,7 @@
 		F94004EE3074D18500BC6413 /* ScreenSafeArea.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenSafeArea.swift; sourceTree = "<group>"; };
 		F94004EF3074D18500BC6413 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F94004F03074D18500BC6413 /* sfx_cannon_shoot.m4a */ = {isa = PBXFileReference; lastKnownFileType = file; path = sfx_cannon_shoot.m4a; sourceTree = "<group>"; };
+		A1B2C3D43074D18500BC6413 /* sfx_button_press.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = sfx_button_press.caf; sourceTree = "<group>"; };
 		F94004F13074D18500BC6413 /* sfx_card_count.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = sfx_card_count.caf; sourceTree = "<group>"; };
 		F94004F23074D18500BC6413 /* sfx_card_flight.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = sfx_card_flight.caf; sourceTree = "<group>"; };
 		F94004F33074D18500BC6413 /* sfx_card_reveal.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = sfx_card_reveal.caf; sourceTree = "<group>"; };
@@ -214,6 +216,7 @@
 				F94004EE3074D18500BC6413 /* ScreenSafeArea.swift */,
 				F94004EF3074D18500BC6413 /* SettingsView.swift */,
 				F94004F03074D18500BC6413 /* sfx_cannon_shoot.m4a */,
+				A1B2C3D43074D18500BC6413 /* sfx_button_press.caf */,
 				F94004F13074D18500BC6413 /* sfx_card_count.caf */,
 				F94004F23074D18500BC6413 /* sfx_card_flight.caf */,
 				F94004F33074D18500BC6413 /* sfx_card_reveal.caf */,
@@ -348,6 +351,7 @@
 				F940050D3074D18500BC6413 /* translations.py in Resources */,
 				F940050E3074D18500BC6413 /* sfx_turbo.m4a in Resources */,
 				F940050F3074D18500BC6413 /* sfx_cannon_shoot.m4a in Resources */,
+				A1B2C3D53074D18500BC6413 /* sfx_button_press.caf in Resources */,
 				F94005103074D18500BC6413 /* sfx_character_unlock.caf in Resources */,
 				F94005113074D18500BC6413 /* splash.caf in Resources */,
 				F94005123074D18500BC6413 /* sfx_card_count.caf in Resources */,
