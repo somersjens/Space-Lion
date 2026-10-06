@@ -300,7 +300,7 @@ struct GameView: View {
                 HStack(spacing: isPad ? 10 : 7) {
                     Image(systemName: "function")
                         .foregroundStyle(hudCyan)
-                    Text(verbatim: model.round?.question.prompt ?? "—")
+                    highlightedQuestion(model.round?.question.prompt ?? "—")
                         .font(.system(size: isPad ? 32 : 23,
                                       weight: .black,
                                       design: .rounded))
@@ -342,7 +342,7 @@ struct GameView: View {
             .contentShape(RoundedRectangle(cornerRadius: isPad ? 18 : 13,
                                            style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CockpitPressStyle())
         .accessibilityIdentifier("pause")
     }
 
@@ -353,14 +353,35 @@ struct GameView: View {
     private var timerCounter: some View {
         let minutes = model.timeRemaining / 60
         let seconds = model.timeRemaining % 60
+        let total = max(1, request.board.maximum * 10)
+        let progress = CGFloat(min(1, max(0, Double(model.timeRemaining) / Double(total))))
+        let isUrgent = model.timeRemaining <= 10
         return cockpitPanel {
             HStack(spacing: isPad ? 8 : 5) {
-                Image(systemName: "timer")
-                    .foregroundStyle(model.timeRemaining <= 10 ? hudOrange : hudCyan)
+                ZStack {
+                    Circle()
+                        .stroke(.white.opacity(0.12), lineWidth: isPad ? 4 : 3)
+                    Circle()
+                        .trim(from: 0, to: progress)
+                        .stroke(isUrgent ? hudOrange : hudCyan,
+                                style: StrokeStyle(lineWidth: isPad ? 4 : 3,
+                                                   lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .shadow(color: (isUrgent ? hudOrange : hudCyan).opacity(0.8),
+                                radius: isPad ? 5 : 3)
+                    Image(systemName: "timer")
+                        .font(.system(size: isPad ? 24 : 17, weight: .bold))
+                        .foregroundStyle(isUrgent ? hudOrange : hudCyan)
+                }
+                .frame(width: isPad ? 39 : 29, height: isPad ? 39 : 29)
+                .scaleEffect(isUrgent ? 1.04 : 1)
+                .animation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true),
+                           value: isUrgent)
                 Text(String(format: "%d:%02d", minutes, seconds))
                     .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
                     .monospacedDigit()
                     .contentTransition(.numericText())
+                    .foregroundStyle(isUrgent ? hudOrange : .white)
             }
             .frame(maxWidth: .infinity)
         }
@@ -370,22 +391,60 @@ struct GameView: View {
 
     private var scoreCounter: some View {
         cockpitPanel {
-            HStack(spacing: isPad ? 8 : 5) {
-                Image(systemName: "scope")
-                    .foregroundStyle(hudCyan)
-                Text(verbatim: "\(model.cards) / \(request.board.maximum)")
-                    .environment(\.layoutDirection, .leftToRight)
-                    .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.68)
-                    .contentTransition(.numericText(value: Double(model.cards)))
+            VStack(spacing: isPad ? 5 : 3) {
+                HStack(spacing: isPad ? 8 : 5) {
+                    Image(systemName: "scope")
+                        .foregroundStyle(hudCyan)
+                    Text(verbatim: "\(model.cards) / \(request.board.maximum)")
+                        .environment(\.layoutDirection, .leftToRight)
+                        .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                        .contentTransition(.numericText(value: Double(model.cards)))
+                }
+                progressSegments
             }
             .frame(maxWidth: .infinity)
         }
         .frame(width: isPad ? 210 : 142)
         .animation(.spring(response: 0.3, dampingFraction: 0.72), value: model.cards)
         .accessibilityIdentifier("progress")
+    }
+
+    private var progressSegments: some View {
+        let count = 6
+        let maximum = max(1, request.board.maximum)
+        let progress = min(1, max(0, Double(model.cards) / Double(maximum)))
+        return HStack(spacing: isPad ? 4 : 3) {
+            ForEach(0..<count, id: \.self) { index in
+                let threshold = Double(index + 1) / Double(count)
+                Capsule()
+                    .fill(progress + 0.0001 >= threshold
+                          ? Color(red: 0.30, green: 1.00, blue: 0.56)
+                          : Color(red: 0.16, green: 0.25, blue: 0.40))
+                    .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 0.7))
+                    .shadow(color: progress + 0.0001 >= threshold
+                            ? Color(red: 0.30, green: 1.00, blue: 0.56).opacity(0.8)
+                            : .clear,
+                            radius: isPad ? 4 : 2)
+            }
+        }
+        .frame(height: isPad ? 8 : 6)
+        .animation(.spring(response: 0.34, dampingFraction: 0.72), value: model.cards)
+        .accessibilityHidden(true)
+    }
+
+    private func highlightedQuestion(_ prompt: String) -> Text {
+        guard let marker = prompt.range(of: "?") else {
+            return Text(verbatim: prompt).foregroundColor(.white)
+        }
+        let leading = String(prompt[..<marker.lowerBound])
+        let trailing = String(prompt[marker.upperBound...])
+        return Text(verbatim: leading).foregroundColor(.white)
+            + Text(verbatim: "?")
+                .foregroundColor(hudOrange)
+            + Text(verbatim: trailing).foregroundColor(.white)
     }
 
     private func cockpitPanel<Content: View>(
@@ -461,6 +520,17 @@ private struct CockpitHUDShape: Shape {
         path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + c))
         path.closeSubpath()
         return path
+    }
+}
+
+private struct CockpitPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .brightness(configuration.isPressed ? 0.12 : 0)
+            .offset(y: configuration.isPressed ? 2 : 0)
+            .animation(.spring(response: 0.18, dampingFraction: 0.66),
+                       value: configuration.isPressed)
     }
 }
 
