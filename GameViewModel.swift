@@ -67,15 +67,6 @@ final class GameViewModel: ObservableObject {
     /// the step being taught bends; it never touches the engine itself.
     private let director = TutorialDirector()
 
-    var maximumRounds: Int { engine.maximumRounds }
-
-    /// True during the short feedback beat after the passage that will fill
-    /// the board. The playfield uses this head start to glide into its finale
-    /// instead of waiting motionless for the engine to close the round.
-    var preparesLevelCompletion: Bool {
-        guard engine.state == .resolving, engine.livesRemaining > 0 else { return false }
-        return engine.cards >= request.board.maximum || engine.roundNumber >= engine.maximumRounds
-    }
     var acceptsInput: Bool { state == .answering && !isPaused }
 
     init(request: GameSessionRequest) {
@@ -315,10 +306,9 @@ final class GameViewModel: ObservableObject {
         // life lesson only a wrong hoop the penguin really flew through does.
         // A non-nil cost here is the playing field saying the set was passed
         // underneath, which is the one case that half-price penalty covers.
-        let costHalves = tutorial.preventsLifeLoss
-            || (tutorial.preventsBypassLifeLoss && wrongAnswerCostHalves != nil)
-            ? 0
-            : wrongAnswerCostHalves
+        // Space Lion is now a pure timed challenge. A wrong answer records the
+        // miss and repeats the sum, but never removes a life or ends the run.
+        let costHalves = 0
         let spendsBonusFish = hasBonusFishPower
         let outcome = engine.select(optionID: optionID,
                                     usesBonusFish: usesSpeedBonus || spendsBonusFish,

@@ -30,9 +30,9 @@ struct ResultView: View {
     private var textScale: CGFloat { isPad ? 1.296 : 1 }
 
     private var maximum: Int { board.maximum }
-    /// The level's score tops out at its maximum, exactly as the menu stores
-    /// it; cards beyond that still count toward the player's grand total.
-    private var levelScore: Int { min(result.cardsEarned, maximum) }
+    /// Timed runs can travel beyond the board target, so the result reports the
+    /// complete distance rather than clipping the visible score at 100%.
+    private var levelScore: Int { result.cardsEarned }
     private var showsNewBest: Bool { result.isNewPersonalBest && result.cardsEarned > 0 }
 
     private var isCompleted: Bool { result.reason == .roundsCompleted }

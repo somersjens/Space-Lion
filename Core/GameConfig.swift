@@ -37,14 +37,14 @@ public enum GameConfig {
 
     // MARK: Session
 
-    /// A session ends when the board's own target is reached (`LevelBoard
-    /// .maximum`) or the lives run out — never on a flat round count, which is
-    /// what used to stop a 50-bubble board at around 24.
-    ///
-    /// Every round pays at least one bubble, so a board can always be filled
-    /// within `maximum` rounds. This is the ceiling across every board, used
-    /// only to sanity-check a stored session.
-    public static var maximumRoundCeiling: Int { supermixLevelMaximum }
+    /// Timed runs keep generating questions after the board target has been
+    /// passed. This deliberately generous ceiling only sanity-checks restored
+    /// sessions; the clock remains the actual end condition.
+    public static let maximumRoundCeiling = 10_000
+
+    /// Keep a small runway ready while allowing a timed run to continue well
+    /// beyond its target without holding thousands of rounds in memory.
+    public static let preparedRoundRunway = 4
 
     /// Cards awarded for a correct answer on a normal card.
     public static let normalCardReward = 1

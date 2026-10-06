@@ -15,24 +15,20 @@ private enum LionMotionPhase: Equatable {
 /// result, score and navigation flows remain untouched.
 struct SpaceLionPlayfield: View {
     let rounds: [GameRound]
-    let maximumRounds: Int
     let character: AnimalCharacter
     let isPad: Bool
     let isLive: Bool
     let isRunning: Bool
     let playsFishEntrance: Bool
-    let preparesLevelCompletion: Bool
     let playsLevelCompletion: Bool
     let reduceMotion: Bool
     let topReserve: CGFloat
     let bottomReserve: CGFloat
+    let leftReserve: CGFloat
+    let rightReserve: CGFloat
     var tutorial: TutorialPlan = TutorialPlan()
     var tutorialMessage: String? = nil
     var onTutorialEvent: (TutorialEvent) -> Void = { _ in }
-    var isRescueHeartDue: Bool = false
-    var onRescueHeartPlaced: () -> Void = {}
-    var onLifeHeartCollected: (CGPoint) -> Void = { _ in }
-    var lifeHeartSize: CGFloat = 22
     let onHit: (UUID, Bool, Bool) -> Bool
     let onSwallow: (Bool) -> Void
     let onDive: () -> Void
@@ -63,18 +59,20 @@ struct SpaceLionPlayfield: View {
             let metrics = Metrics(size: proxy.size,
                                   topReserve: topReserve,
                                   bottomReserve: bottomReserve,
+                                  leftReserve: leftReserve,
+                                  rightReserve: rightReserve,
                                   isPad: isPad)
             ZStack {
-                SpaceBackdrop(accent: character.color,
-                              deep: character.deepColor,
-                              isRunning: isRunning && !reduceMotion)
+                SpaceshipCockpit(accent: character.color,
+                                 deep: character.deepColor,
+                                 topReserve: topReserve,
+                                 isRunning: isRunning && !reduceMotion)
 
                 if let round {
-                    questionBadge(round.question.prompt, metrics: metrics)
-
                     ForEach(Array(round.options.prefix(8).enumerated()), id: \.element.id) { index, option in
                         answerButton(option,
                                      at: metrics.answerPoints[index],
+                                     orientation: metrics.answerOrientations[index],
                                      centre: metrics.centre,
                                      size: metrics.answerSize,
                                      lionSize: metrics.lionSize)
@@ -117,27 +115,9 @@ struct SpaceLionPlayfield: View {
         .ignoresSafeArea()
     }
 
-    private func questionBadge(_ prompt: String, metrics: Metrics) -> some View {
-        Text(prompt)
-            .font(.system(size: metrics.questionFontSize, weight: .heavy, design: .rounded))
-            .minimumScaleFactor(0.55)
-            .lineLimit(1)
-            .foregroundStyle(.white)
-            .padding(.horizontal, metrics.answerSize * 0.42)
-            .padding(.vertical, metrics.answerSize * 0.13)
-            .background {
-                Capsule()
-                    .fill(.black.opacity(0.48))
-                    .overlay(Capsule().stroke(.white.opacity(0.60), lineWidth: 2))
-                    .shadow(color: character.color.opacity(0.58), radius: 13)
-            }
-            .frame(maxWidth: metrics.size.width * 0.46)
-            .position(x: metrics.centre.x, y: metrics.questionY)
-            .accessibilityIdentifier("space-lion-question")
-    }
-
     private func answerButton(_ option: AnswerOption,
                               at point: CGPoint,
+                              orientation: Double,
                               centre: CGPoint,
                               size: CGFloat,
                               lionSize: CGFloat) -> some View {
@@ -161,7 +141,8 @@ struct SpaceLionPlayfield: View {
                        size: size,
                        textScale: 1,
                        feedback: feedback,
-                       isPressed: isPressed)
+                       isPressed: isPressed,
+                       orientationDegrees: orientation)
                 .scaleEffect(isSelected ? buttonImpactScale : 1)
         }
         .buttonStyle(.plain)
@@ -519,50 +500,64 @@ private extension SpaceLionPlayfield {
         let size: CGSize
         let topReserve: CGFloat
         let bottomReserve: CGFloat
+        let leftReserve: CGFloat
+        let rightReserve: CGFloat
         let isPad: Bool
 
         var answerSize: CGFloat {
-            min(isPad ? 90 : 70, max(isPad ? 72 : 54, size.height * 0.125))
+            min(isPad ? 164 : 126,
+                max(isPad ? 132 : 100, size.height * (isPad ? 0.23 : 0.27)))
         }
-        var lionSize: CGFloat { min(size.width * 0.24, size.height * (isPad ? 0.37 : 0.39)) }
-        var centre: CGPoint { CGPoint(x: size.width * 0.5, y: size.height * 0.54) }
-        var questionY: CGFloat { max(34, topReserve * 0.52) }
-        var questionFontSize: CGFloat { isPad ? 38 : max(24, size.height * 0.058) }
+        var lionSize: CGFloat { min(size.width * 0.23, size.height * (isPad ? 0.35 : 0.38)) }
+        var centre: CGPoint { CGPoint(x: size.width * 0.5, y: size.height * 0.55) }
 
         /// Eight seats on the screen rim. Centres sit just inside the edge so
         /// the authored button canvases' visible metal housing meets the rim.
         var answerPoints: [CGPoint] {
-            let inset = answerSize * 0.47
-            let topY = max(topReserve + answerSize * 0.48, inset)
-            let bottomY = min(size.height - bottomReserve - answerSize * 0.48,
+            let inset = answerSize * 0.43
+            let leftX = max(inset, leftReserve + answerSize * 0.52)
+            let rightX = min(size.width - inset,
+                             size.width - rightReserve - answerSize * 0.52)
+            let topY = max(topReserve + answerSize * 0.43, inset)
+            let bottomY = min(size.height - bottomReserve - answerSize * 0.43,
                               size.height - inset)
-            let upperSideY = size.height * 0.40
-            let lowerSideY = size.height * 0.68
-            let topXLeft = size.width * 0.32
-            let topXRight = size.width * 0.68
+            let upperSideY = max(topY + answerSize * 0.22, size.height * 0.43)
+            let lowerSideY = min(bottomY - answerSize * 0.20, size.height * 0.72)
+            let topXLeft = size.width * 0.30
+            let topXRight = size.width * 0.70
             return [
                 CGPoint(x: topXLeft, y: topY),
                 CGPoint(x: topXRight, y: topY),
-                CGPoint(x: size.width - inset, y: upperSideY),
-                CGPoint(x: size.width - inset, y: lowerSideY),
+                CGPoint(x: rightX, y: upperSideY),
+                CGPoint(x: rightX, y: lowerSideY),
                 CGPoint(x: topXRight, y: bottomY),
                 CGPoint(x: topXLeft, y: bottomY),
-                CGPoint(x: inset, y: lowerSideY),
-                CGPoint(x: inset, y: upperSideY)
+                CGPoint(x: leftX, y: lowerSideY),
+                CGPoint(x: leftX, y: upperSideY)
             ]
+        }
+
+        /// The housing follows the surface it is bolted to: overhead controls
+        /// face down, side controls face inward and console controls face up.
+        /// AnswerHoop counter-rotates its number so every value stays upright.
+        var answerOrientations: [Double] {
+            [180, 180, 90, 90, 0, 0, -90, -90]
         }
     }
 }
 
-private struct SpaceBackdrop: View {
+private struct SpaceshipCockpit: View {
     let accent: Color
     let deep: Color
+    let topReserve: CGFloat
     let isRunning: Bool
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !isRunning)) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
             Canvas { context, size in
+                // The exterior is only the view through the windshield. Stars
+                // and planets move at different speeds to sell forward travel.
                 context.fill(Path(CGRect(origin: .zero, size: size)),
                              with: .linearGradient(
                                 Gradient(colors: [Color(red: 0.025, green: 0.035, blue: 0.15),
@@ -571,8 +566,12 @@ private struct SpaceBackdrop: View {
                                 startPoint: .zero,
                                 endPoint: CGPoint(x: size.width, y: size.height)))
 
-                for index in 0..<96 {
-                    let x = CGFloat((index * 73 + 19) % 101) / 101 * size.width
+                let starTravel = CGFloat(time.truncatingRemainder(dividingBy: 17)) / 17
+                for index in 0..<112 {
+                    let baseX = CGFloat((index * 73 + 19) % 113) / 113
+                    let shiftedX = (baseX - starTravel * (index.isMultiple(of: 3) ? 0.34 : 0.18) + 1)
+                        .truncatingRemainder(dividingBy: 1)
+                    let x = shiftedX * size.width
                     let y = CGFloat((index * 47 + 11) % 97) / 97 * size.height
                     let twinkle = 0.42 + 0.48 * (sin(time * 1.25 + Double(index)) + 1) * 0.5
                     let radius = CGFloat(index % 4 == 0 ? 2.0 : 1.1)
@@ -584,10 +583,12 @@ private struct SpaceBackdrop: View {
                 }
                 context.opacity = 1
 
-                let planet = CGRect(x: size.width * 0.76,
-                                    y: size.height * 0.70,
-                                    width: size.height * 0.30,
-                                    height: size.height * 0.30)
+                let planetTravel = CGFloat(time.truncatingRemainder(dividingBy: 64)) / 64
+                let planetSide = size.height * 0.34
+                let planet = CGRect(x: size.width * (1.12 - planetTravel * 1.46),
+                                    y: size.height * 0.60,
+                                    width: planetSide,
+                                    height: planetSide)
                 context.fill(Path(ellipseIn: planet),
                              with: .radialGradient(
                                 Gradient(colors: [accent.opacity(0.75), deep.opacity(0.72)]),
@@ -595,13 +596,102 @@ private struct SpaceBackdrop: View {
                                                 y: planet.midY - planet.height * 0.22),
                                 startRadius: 2,
                                 endRadius: planet.width * 0.62))
+
+                let moonTravel = CGFloat(time.truncatingRemainder(dividingBy: 93)) / 93
+                let moonSide = size.height * 0.16
+                let moon = CGRect(x: size.width * (0.88 - moonTravel * 1.18),
+                                  y: size.height * 0.24,
+                                  width: moonSide,
+                                  height: moonSide)
+                context.fill(Path(ellipseIn: moon),
+                             with: .radialGradient(
+                                Gradient(colors: [.white.opacity(0.86),
+                                                  Color(red: 0.36, green: 0.55, blue: 0.83)]),
+                                center: CGPoint(x: moon.midX - moon.width * 0.20,
+                                                y: moon.midY - moon.height * 0.20),
+                                startRadius: 1,
+                                endRadius: moon.width * 0.68))
+
+                // Blue glass tint belongs to the windshield, not to outer
+                // space; the opaque structure painted next covers its edges.
+                context.fill(Path(CGRect(origin: .zero, size: size)),
+                             with: .linearGradient(
+                                Gradient(colors: [accent.opacity(0.10),
+                                                  .clear,
+                                                  Color.cyan.opacity(0.06)]),
+                                startPoint: .zero,
+                                endPoint: CGPoint(x: size.width, y: size.height)))
+
+                let metalTop = Color(red: 0.15, green: 0.19, blue: 0.27)
+                let metalBottom = Color(red: 0.025, green: 0.04, blue: 0.08)
+                let panelGradient = Gradient(colors: [metalTop, metalBottom])
+
+                // Overhead rail behind the HUD.
+                let roofHeight = max(topReserve * 0.92, size.height * 0.16)
+                let roof = Path(CGRect(x: 0, y: 0,
+                                      width: size.width, height: roofHeight))
+                context.fill(roof, with: .linearGradient(panelGradient,
+                                                          startPoint: .zero,
+                                                          endPoint: CGPoint(x: 0, y: roofHeight)))
+
+                // Angled sidewalls and lower console turn the open star field
+                // into a cockpit window while leaving a generous centre view.
+                var leftWall = Path()
+                leftWall.move(to: CGPoint(x: 0, y: roofHeight * 0.72))
+                leftWall.addLine(to: CGPoint(x: size.width * 0.18, y: roofHeight))
+                leftWall.addLine(to: CGPoint(x: size.width * 0.13, y: size.height * 0.78))
+                leftWall.addLine(to: CGPoint(x: 0, y: size.height))
+                leftWall.closeSubpath()
+                context.fill(leftWall, with: .linearGradient(panelGradient,
+                                                              startPoint: .zero,
+                                                              endPoint: CGPoint(x: size.width * 0.18,
+                                                                                y: size.height)))
+
+                var rightWall = Path()
+                rightWall.move(to: CGPoint(x: size.width, y: roofHeight * 0.72))
+                rightWall.addLine(to: CGPoint(x: size.width * 0.82, y: roofHeight))
+                rightWall.addLine(to: CGPoint(x: size.width * 0.87, y: size.height * 0.78))
+                rightWall.addLine(to: CGPoint(x: size.width, y: size.height))
+                rightWall.closeSubpath()
+                context.fill(rightWall, with: .linearGradient(panelGradient,
+                                                               startPoint: CGPoint(x: size.width, y: 0),
+                                                               endPoint: CGPoint(x: size.width * 0.82,
+                                                                                 y: size.height)))
+
+                var console = Path()
+                console.move(to: CGPoint(x: 0, y: size.height))
+                console.addLine(to: CGPoint(x: 0, y: size.height * 0.82))
+                console.addLine(to: CGPoint(x: size.width * 0.20, y: size.height * 0.73))
+                console.addLine(to: CGPoint(x: size.width * 0.80, y: size.height * 0.73))
+                console.addLine(to: CGPoint(x: size.width, y: size.height * 0.82))
+                console.addLine(to: CGPoint(x: size.width, y: size.height))
+                console.closeSubpath()
+                context.fill(console, with: .linearGradient(panelGradient,
+                                                             startPoint: CGPoint(x: 0, y: size.height * 0.72),
+                                                             endPoint: CGPoint(x: 0, y: size.height)))
+
+                // Illuminated seams make each answer control read as bolted to
+                // one continuous ship interior.
+                context.stroke(leftWall, with: .color(accent.opacity(0.72)), lineWidth: 3)
+                context.stroke(rightWall, with: .color(accent.opacity(0.72)), lineWidth: 3)
+                context.stroke(console, with: .color(accent.opacity(0.72)), lineWidth: 3)
+                context.stroke(Path(CGRect(x: 0, y: roofHeight - 2,
+                                           width: size.width, height: 2)),
+                               with: .color(accent.opacity(0.72)), lineWidth: 2)
+
+                for index in 0..<8 {
+                    let side = index < 4
+                    let x = side
+                        ? (index.isMultiple(of: 2) ? size.width * 0.035 : size.width * 0.965)
+                        : size.width * (0.28 + CGFloat(index - 4) * 0.145)
+                    let y = side
+                        ? size.height * (0.28 + CGFloat(index / 2) * 0.38)
+                        : size.height * 0.94
+                    context.fill(Path(ellipseIn: CGRect(x: x - 3, y: y - 3,
+                                                        width: 6, height: 6)),
+                                 with: .color(.white.opacity(0.44)))
+                }
             }
-        }
-        .overlay {
-            LinearGradient(colors: [.clear, accent.opacity(0.09), .clear],
-                           startPoint: .topLeading,
-                           endPoint: .bottomTrailing)
-                .blendMode(.screen)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)

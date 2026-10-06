@@ -73689,6 +73689,9 @@
         }
       }
     },
+    "Pause" : {
+
+    },
     "premium.availableAt %lld" : {
       "comment" : "The count is always 500, 1500, 3000 or 5000 (GameConfig.characterUnlockRequirements).",
       "extractionState" : "manual",

@@ -2619,6 +2619,9 @@ struct AnswerHoop: View {
     let textScale: CGFloat
     let feedback: HoopFeedback
     var isPressed: Bool = false
+    /// Rotates the physical housing to match the panel it is mounted on. The
+    /// label is counter-rotated below so answer values always stay upright.
+    var orientationDegrees: Double = 0
 
     private enum Art {
         static let canvas: CGFloat = 1254
@@ -2690,9 +2693,11 @@ struct AnswerHoop: View {
                     // Sit on the red top-face centre (perspective art), not the
                     // square canvas mid-point — that mid-point reads too low.
                     .offset(y: faceOffset)
+                    .rotationEffect(.degrees(-orientationDegrees))
                 if feedback == .bonus {
                     BonusStarBurst(size: size * 0.85)
                         .offset(y: faceOffset)
+                        .rotationEffect(.degrees(-orientationDegrees))
                 }
             }
             .offset(y: isPressed ? travel : 0)
@@ -2712,6 +2717,7 @@ struct AnswerHoop: View {
             .opacity(feedback == .inactive ? 0.55 : 1)
         }
         .frame(width: size, height: size)
+        .rotationEffect(.degrees(orientationDegrees))
         .contentShape(Circle())
         .animation(isPressed ? .easeIn(duration: 0.08) : .easeOut(duration: 0.24),
                    value: isPressed)

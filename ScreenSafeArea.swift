@@ -22,6 +22,8 @@ import UIKit
 struct ScreenSafeArea: Equatable {
     var top: CGFloat = 0
     var bottom: CGFloat = 0
+    var left: CGFloat = 0
+    var right: CGFloat = 0
 
     @MainActor
     static var current: ScreenSafeArea {
@@ -31,7 +33,10 @@ struct ScreenSafeArea: Equatable {
             .flatMap(\.windows)
             .first { $0.isKeyWindow }
         guard let insets = window?.safeAreaInsets else { return ScreenSafeArea() }
-        return ScreenSafeArea(top: insets.top, bottom: insets.bottom)
+        return ScreenSafeArea(top: insets.top,
+                              bottom: insets.bottom,
+                              left: insets.left,
+                              right: insets.right)
 #else
         return ScreenSafeArea()
 #endif

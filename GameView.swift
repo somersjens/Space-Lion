@@ -66,20 +66,6 @@ struct GameView: View {
     /// The tutorial switch on the start card. It only decides what the start
     /// button says and does; the run itself is driven by the view model.
     @State private var isTutorialArmed = false
-    /// Where the lives meter sits, measured in the same space the playing field
-    /// draws in, so a caught heart can be flown to the exact heart it fills.
-    @State private var livesFrame: CGRect = .zero
-    /// Hearts on their way from the flight path to the meter.
-    @State private var heartFlights: [HeartFlight] = []
-    /// The broken heart that explains a wrong tutorial hoop, travelling from
-    /// the lesson icon to the life that just disappeared from the meter.
-    @State private var tutorialHeartLossFlights: [HeartFlight] = []
-    @State private var tutorialMessageIconFrame: CGRect = .zero
-    /// The short pop a heart leaves on the meter as it lands.
-    @State private var heartLandings: [HeartLanding] = []
-    /// Bumped when a heart lands, which is when the meter says "+1".
-    @State private var lifeGainToken = 0
-
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(request: GameSessionRequest) {
@@ -214,20 +200,20 @@ struct GameView: View {
         return GeometryReader { proxy in
             ZStack(alignment: .top) {
                 SpaceLionPlayfield(rounds: model.visibleRounds,
-                              maximumRounds: model.maximumRounds,
                               character: character,
                               isPad: isPad,
                               isLive: model.acceptsInput,
                               isRunning: isReefRunning,
                               playsFishEntrance: playsFishEntrance,
-                              preparesLevelCompletion: model.preparesLevelCompletion,
                               playsLevelCompletion: playsLevelCompletion,
                               reduceMotion: reduceMotion,
                               // The HUD's own height, so the swarm's ceiling is
                               // the underside of the HUD and never the status bar
                               // or the Dynamic Island behind it.
-                              topReserve: topInset + (isPad ? 76 : 50),
+                              topReserve: topInset + (isPad ? 112 : 78),
                               bottomReserve: screenInsets.bottom,
+                              leftReserve: screenInsets.left,
+                              rightReserve: screenInsets.right,
                               // What the tutorial is teaching, what it is
                               // saying, and where its answers go back to. All
                               // three are inert in a normal session, and the
@@ -235,11 +221,6 @@ struct GameView: View {
                               tutorial: model.tutorial,
                               tutorialMessage: tutorialMessage,
                               onTutorialEvent: handleTutorialEvent(_:),
-                              // The one rescue heart of a normal session.
-                              isRescueHeartDue: model.isRescueHeartDue,
-                              onRescueHeartPlaced: { model.placeRescueHeart() },
-                              onLifeHeartCollected: collectLifeHeart(at:),
-                              lifeHeartSize: hudHeartSize,
                               onHit: { optionID, usesSpeedBonus, usesHalfLifePenalty in
                                   model.select(optionID: optionID,
                                                usesSpeedBonus: usesSpeedBonus,
@@ -258,7 +239,11 @@ struct GameView: View {
                     .environment(\.layoutDirection, .leftToRight)
 
                 hud
-                    .padding(.horizontal, isPad ? 28 : 16)
+                    // In landscape the Dynamic Island lives in a horizontal
+                    // safe area. Respect both physical edges rather than only
+                    // the status-bar inset at the top.
+                    .padding(.leading, max(screenInsets.left, isPad ? 28 : 14))
+                    .padding(.trailing, max(screenInsets.right, isPad ? 28 : 14))
                     .padding(.top, hudTop(below: topInset))
                     .opacity(showsGameplayHUD ? 1 : 0)
                     .scaleEffect(showsGameplayHUD ? 1 : 0.92, anchor: .topLeading)
@@ -275,34 +260,8 @@ struct GameView: View {
                         .allowsHitTesting(false)
                 }
 
-                // Drawn over the HUD, because the whole point of the flight is
-                // that it ends on the meter.
-                ForEach(heartFlights) { flight in
-                    HeartFlightView(flight: flight,
-                                    tint: character.deepColor,
-                                    size: hudHeartSize)
-                }
-                .allowsHitTesting(false)
-
-                ForEach(tutorialHeartLossFlights) { flight in
-                    TutorialHeartLossFlightView(flight: flight,
-                                                tint: character.color,
-                                                size: hudHeartSize)
-                }
-                .allowsHitTesting(false)
-
-                ForEach(heartLandings) { landing in
-                    HeartLandingPop(point: landing.point,
-                                    tint: character.deepColor,
-                                    size: hudHeartSize)
-                }
-                .allowsHitTesting(false)
             }
             .coordinateSpace(name: TutorialMessageCoordinateSpace.game)
-            .onPreferenceChange(LivesFrameKey.self) { livesFrame = $0 }
-            .onPreferenceChange(TutorialMessageIconFrameKey.self) {
-                tutorialMessageIconFrame = $0
-            }
         }
         .ignoresSafeArea()
     }
@@ -310,90 +269,7 @@ struct GameView: View {
     /// A wrong passage in the life lesson gets one extra visual response before
     /// the director schedules its hand-over to the farewell.
     private func handleTutorialEvent(_ event: TutorialEvent) {
-        if event == .passedWrongHoop, model.tutorial.step == .wrongHoop {
-            flyTutorialHeartLossToHUD()
-        }
         model.reportTutorial(event)
-    }
-
-    /// The life has already been charged by the engine when the passage is
-    /// reported. Its new value therefore identifies the exact slot that was
-    /// just emptied. Only after the broken heart reaches that slot is the life
-    /// restored, making the subtraction and the return two readable events.
-    private func flyTutorialHeartLossToHUD() {
-        let duration = reduceMotion ? 0.28 : 0.72
-        guard tutorialMessageIconFrame != .zero, livesFrame != .zero else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
-                restoreTutorialLife(at: nil)
-            }
-            return
-        }
-        let target = livesTarget(filling: model.livesRemaining)
-        let flight = HeartFlight(
-            source: CGPoint(x: tutorialMessageIconFrame.midX,
-                            y: tutorialMessageIconFrame.midY),
-            target: target,
-            arc: isPad ? 96 : 68,
-            duration: duration
-        )
-        tutorialHeartLossFlights.append(flight)
-        DispatchQueue.main.asyncAfter(deadline: .now() + flight.duration) {
-            tutorialHeartLossFlights.removeAll { $0.id == flight.id }
-            restoreTutorialLife(at: target)
-        }
-    }
-
-    private func restoreTutorialLife(at point: CGPoint?) {
-        AppAudio.shared.playLifePickup()
-        landLifeHeart(at: point)
-    }
-
-    /// A heart was flown into. The heart itself travels first, unchanged in
-    /// size and shape, to the exact slot on the meter it is going to fill — and
-    /// only when it lands does the life count up. Carrying it there and then
-    /// adding it is what makes the meter's answer legible; adding it at the
-    /// pick-up and flying a ghost after it says nothing.
-    private func collectLifeHeart(at point: CGPoint) {
-        guard model.canTakeLifeHeart else { return }
-        AppAudio.shared.playLifePickup()
-        let target = livesTarget(filling: model.livesRemaining)
-        guard livesFrame != .zero else {
-            landLifeHeart(at: nil)
-            return
-        }
-        let flight = HeartFlight(source: point,
-                                 target: target,
-                                 arc: isPad ? 90 : 64,
-                                 duration: reduceMotion ? 0.28 : 0.62)
-        heartFlights.append(flight)
-        DispatchQueue.main.asyncAfter(deadline: .now() + flight.duration) {
-            heartFlights.removeAll { $0.id == flight.id }
-            landLifeHeart(at: target)
-        }
-    }
-
-    /// The heart has arrived: the life goes on the meter, the meter pops, and
-    /// the "+1" says what just happened.
-    private func landLifeHeart(at point: CGPoint?) {
-        guard model.collectLifeHeart() else { return }
-        lifeGainToken &+= 1
-        guard let point else { return }
-        let pop = HeartLanding(point: point)
-        heartLandings.append(pop)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-            heartLandings.removeAll { $0.id == pop.id }
-        }
-    }
-
-    /// The centre of the heart that is about to fill. The meter draws its
-    /// hearts as equal slices of one column, so the slot is worked out from the
-    /// lives the player had before the pick-up rather than measured separately.
-    private func livesTarget(filling livesBefore: Double) -> CGPoint {
-        let capacity = max(1, Int(GameConfig.startingLives.rounded(.up)))
-        let index = min(capacity - 1, max(0, Int(livesBefore.rounded(.down))))
-        let slot = livesFrame.height / CGFloat(capacity)
-        return CGPoint(x: livesFrame.midX,
-                       y: livesFrame.minY + slot * (CGFloat(index) + 0.5))
     }
 
     /// The line the guided run is on, resolved in the language being read.
@@ -413,55 +289,37 @@ struct GameView: View {
 
     // MARK: - HUD
 
-    /// Two balanced columns: pause and score on the left, three hearts on the
-    /// right. Both columns have exactly the same total height.
+    /// One continuous cockpit rail: pause, the active sum, remaining mission
+    /// time and distance against the board target. It fills the usable width
+    /// without entering either landscape sensor safe area.
     private var hud: some View {
-        HStack(spacing: 0) {
-            primaryHudGroup
-            Spacer(minLength: 0)
+        HStack(spacing: isPad ? 12 : 7) {
+            pauseButton
+
+            cockpitPanel {
+                HStack(spacing: isPad ? 10 : 7) {
+                    Image(systemName: "function")
+                        .foregroundStyle(character.color)
+                    Text(verbatim: model.round?.question.prompt ?? "—")
+                        .font(.system(size: isPad ? 32 : 23,
+                                      weight: .black,
+                                      design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.54)
+                        .accessibilityIdentifier("space-lion-question")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .frame(maxWidth: .infinity)
+
+            timerCounter
+            scoreCounter
         }
+        .frame(maxWidth: .infinity)
     }
 
     private func hudTop(below topInset: CGFloat) -> CGFloat {
-        topInset + (isPad ? 12 : 6)
-    }
-
-    @ViewBuilder
-    private var primaryHudGroup: some View {
-        HStack(spacing: hudStackSpacing) {
-            VStack(spacing: hudStackSpacing) {
-                pauseButton
-                progressCounter
-            }
-            LivesView(lives: model.livesRemaining,
-                      character: character,
-                      isPad: isPad,
-                      glyphSize: hudHeartSize,
-                      rowHeight: hudControlSize,
-                      columnHeight: hudControlSize * 2 + hudStackSpacing)
-                // Where the meter is, in the playing field's own coordinates.
-                .background {
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: LivesFrameKey.self,
-                            value: proxy.frame(in: .named(TutorialMessageCoordinateSpace.game))
-                        )
-                    }
-                }
-                // A caught heart gives a life back. Saying so at the meter, as
-                // the heart lands on it, is what makes three hearts again make
-                // sense to a child who just watched one go.
-                .overlay(alignment: .trailing) {
-                    if lifeGainToken > 0 {
-                        LifeGainBadge(token: lifeGainToken,
-                                      character: character,
-                                      isPad: isPad)
-                            .fixedSize()
-                            .offset(x: isPad ? 88 : 58)
-                    }
-                }
-            timerCounter
-        }
+        topInset + (isPad ? 10 : 5)
     }
 
     /// Pausing freezes the reef in place and puts the level card over it. The
@@ -473,78 +331,92 @@ struct GameView: View {
             showsPauseCard = true
             showsIntro = true
         } label: {
-            Circle()
-                .fill(character.deepColor)
-                .frame(width: hudControlSize, height: hudControlSize)
-                .overlay {
-                    Image(systemName: "pause.fill")
-                        .font(.system(size: pauseGlyphSize, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-                .overlay {
-                    Circle().stroke(.white.opacity(0.92), lineWidth: 3)
-                }
+            cockpitPanel {
+                Image(systemName: "pause.fill")
+                    .font(.system(size: pauseGlyphSize, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityLabel(Text("Pause"))
+            }
+            .frame(width: hudControlSize)
+            .contentShape(RoundedRectangle(cornerRadius: isPad ? 18 : 13,
+                                           style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("pause")
     }
 
-    /// Every status capsule shares one comfortable touch height, while the
-    /// symbols retain enough breathing room to stay legible over the pond.
-    private var hudControlSize: CGFloat { isPad ? 58 : 40 }
-    private var hudStackSpacing: CGFloat { isPad ? 8 : 5 }
-    private var hudHeartSize: CGFloat { isPad ? 34 : 22 }
-    private var pauseGlyphSize: CGFloat { isPad ? 27 : 18 }
-    private var hudNumberSize: CGFloat { isPad ? 29 : 19 }
-
-    /// Just the bubbles banked this session. What the board holds is quoted on
-    /// the start card and again on the result card, so the playing field does
-    /// not have to carry it too.
-    private var progressCounter: some View {
-        ZStack {
-            Circle()
-                .fill(character.deepColor)
-                .overlay(Circle().stroke(.white.opacity(0.92), lineWidth: 3))
-            Text(verbatim: "\(model.cards)")
-                .font(.system(size: hudNumberSize, weight: .heavy, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
-                .allowsTightening(true)
-                .contentTransition(.numericText(value: Double(model.cards)))
-                // Keep multi-digit scores optically inside the same circle on
-                // both phone and iPad instead of letting their glyphs press
-                // against the ring.
-                .frame(width: hudControlSize * 0.72,
-                       height: hudControlSize * 0.72)
-                .foregroundStyle(.white)
-        }
-        .frame(width: hudControlSize, height: hudControlSize)
-        .foregroundStyle(character.deepColor)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: model.cards)
-        .accessibilityIdentifier("progress")
-        // Named after what this character actually collects, in the app's
-        // language — the counter has not been flies-for-everyone since each
-        // animal got its own food.
-    }
+    private var hudControlSize: CGFloat { isPad ? 72 : 54 }
+    private var pauseGlyphSize: CGFloat { isPad ? 28 : 20 }
+    private var hudNumberSize: CGFloat { isPad ? 27 : 19 }
 
     private var timerCounter: some View {
         let minutes = model.timeRemaining / 60
         let seconds = model.timeRemaining % 60
-        return HStack(spacing: isPad ? 8 : 5) {
-            Image(systemName: "timer")
-                .font(.system(size: isPad ? 24 : 16, weight: .bold))
-            Text(String(format: "%d:%02d", minutes, seconds))
-                .font(.system(size: hudNumberSize, weight: .heavy, design: .rounded))
-                .monospacedDigit()
-                .contentTransition(.numericText())
+        return cockpitPanel {
+            HStack(spacing: isPad ? 8 : 5) {
+                Image(systemName: "timer")
+                    .foregroundStyle(model.timeRemaining <= 10 ? .orange : character.color)
+                Text(String(format: "%d:%02d", minutes, seconds))
+                    .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            }
+            .frame(maxWidth: .infinity)
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, isPad ? 16 : 11)
-        .frame(height: hudControlSize)
-        .background(character.deepColor, in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.92), lineWidth: 3))
+        .frame(width: isPad ? 178 : 122)
         .accessibilityIdentifier("level-timer")
+    }
+
+    private var scoreCounter: some View {
+        cockpitPanel {
+            HStack(spacing: isPad ? 8 : 5) {
+                Image(systemName: "scope")
+                    .foregroundStyle(character.color)
+                Text(verbatim: "\(model.cards) / \(request.board.maximum)")
+                    .environment(\.layoutDirection, .leftToRight)
+                    .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+                    .contentTransition(.numericText(value: Double(model.cards)))
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(width: isPad ? 210 : 142)
+        .animation(.spring(response: 0.3, dampingFraction: 0.72), value: model.cards)
+        .accessibilityIdentifier("progress")
+    }
+
+    private func cockpitPanel<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .foregroundStyle(.white)
+            .padding(.horizontal, isPad ? 17 : 10)
+            .frame(height: hudControlSize)
+            .background {
+                RoundedRectangle(cornerRadius: isPad ? 18 : 13, style: .continuous)
+                    .fill(LinearGradient(
+                        colors: [Color(red: 0.10, green: 0.15, blue: 0.24),
+                                 Color(red: 0.025, green: 0.045, blue: 0.10)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: isPad ? 18 : 13,
+                                         style: .continuous)
+                            .stroke(character.color.opacity(0.86), lineWidth: isPad ? 3 : 2)
+                    }
+                    .overlay(alignment: .top) {
+                        Capsule()
+                            .fill(.white.opacity(0.20))
+                            .frame(height: 2)
+                            .padding(.horizontal, isPad ? 18 : 12)
+                            .padding(.top, 5)
+                    }
+                    .shadow(color: character.color.opacity(0.24), radius: 8)
+            }
     }
 
     private var showsGameplayHUD: Bool {

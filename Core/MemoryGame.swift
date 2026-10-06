@@ -34,7 +34,7 @@ public enum GameState: String, Equatable, Sendable {
     case resolving
     /// Feedback finished; the next round can be installed.
     case roundComplete
-    /// The target, life limit or level clock ended the run.
+    /// The level clock ended the run, or the player explicitly quit.
     case gameOver
 }
 
@@ -152,9 +152,9 @@ public final class MemoryGame {
         Double(lifeHalves) / Double(GameConfig.lifeGranularity)
     }
 
-    /// One prepared question per required correct answer. Wrong choices reopen
-    /// the active round and therefore consume no question from this runway.
-    public var maximumRounds: Int { board.maximum }
+    /// The target is a score marker, not a finish line. The clock ends the run,
+    /// so this is only a defensive upper bound for persisted data.
+    public var maximumRounds: Int { GameConfig.maximumRoundCeiling }
 
     /// Whether a tap on an answer card can be accepted right now.
     public var acceptsInput: Bool { state == .answering }
@@ -190,14 +190,13 @@ public final class MemoryGame {
 
     // MARK: - Session lifecycle
 
-    /// Builds the complete question runway while the start/pause card is still
-    /// covering the playfield. A board contains at most fifty small value
-    /// rounds, so keeping the sequence in memory is cheap and removes the last
-    /// generator call from every live round transition.
+    /// Builds the first small question runway while the start/pause card is
+    /// still covering the playfield. The runway is replenished as play moves
+    /// forward, because a timed session is allowed to pass its board target.
     public func prepare(startingAt firstRound: Int = 1) {
         guard state == .intro, round == nil, preparedRounds.isEmpty else { return }
         let first = min(max(1, firstRound), maximumRounds)
-        preparedRounds = (first...maximumRounds).map { factory.makeRound(number: $0) }
+        appendPreparedRounds(startingAt: first)
     }
 
     /// Starts the session and deals the first round's answer cards face up.
@@ -207,6 +206,7 @@ public final class MemoryGame {
         prepare(startingAt: 1)
         roundNumber = 1
         round = preparedRounds.removeFirst()
+        replenishPreparedRounds()
         state = .memorising
         return true
     }
@@ -237,6 +237,7 @@ public final class MemoryGame {
             prepare(startingAt: roundNumber)
         }
         round = preparedRounds.removeFirst()
+        replenishPreparedRounds()
         state = .memorising
         return true
     }
@@ -287,7 +288,7 @@ public final class MemoryGame {
 
     /// Resolves a tap on an answer card. Any tap that arrives in the wrong
     /// state — a second tap on the same round, a tap during feedback, a tap on
-    /// a burned card — is ignored without touching score or lives.
+    /// a burned card — is ignored without touching the score.
     @discardableResult
     public func select(optionID: UUID,
                        usesBonusFish: Bool = false,
@@ -396,7 +397,7 @@ public final class MemoryGame {
     /// and values stay untouched, so the player can try the same sum again.
     @discardableResult
     public func retryCurrentRound() -> Bool {
-        guard state == .roundComplete, lifeHalves > 0, round != nil else { return false }
+        guard state == .roundComplete, round != nil else { return false }
         selectedOptionID = nil
         lastOutcome = nil
         state = .memorising
@@ -409,30 +410,16 @@ public final class MemoryGame {
         finish(reason: .timeExpired)
     }
 
-    /// Installs the next round or ends the session after a correct answer.
+    /// Installs the next round after a correct answer. Passing the board target
+    /// is visible in the HUD, but only the session clock ends the run.
     @discardableResult
     public func advance() -> GameState {
         guard state == .roundComplete else { return state }
 
-        if lifeHalves <= 0 {
-            finish(reason: .outOfLives)
-            return state
-        }
-        // The board is full: this is what "level complete" means, and it is
-        // what the target quoted on the start and result cards refers to.
-        if cards >= board.maximum {
-            finish(reason: .roundsCompleted)
-            return state
-        }
-        if roundNumber >= maximumRounds {
-            finish(reason: .roundsCompleted)
-            return state
-        }
-
         roundNumber += 1
-        // The complete runway was prepared before play began, so installing a
-        // sum is only an array removal on this animation-heavy frame.
+        if preparedRounds.isEmpty { appendPreparedRounds(startingAt: roundNumber) }
         round = preparedRounds.removeFirst()
+        replenishPreparedRounds()
         selectedOptionID = nil
         lastOutcome = nil
         state = .memorising
@@ -457,6 +444,26 @@ public final class MemoryGame {
            lifeHalves <= GameConfig.rescueHeartLifeThresholdHalves {
             rescueHeartArmedRound = roundNumber
         }
+    }
+
+    private func appendPreparedRounds(startingAt first: Int) {
+        guard first <= maximumRounds else { return }
+        let last = min(maximumRounds,
+                       first + GameConfig.preparedRoundRunway - 1)
+        preparedRounds.append(contentsOf: (first...last).map {
+            factory.makeRound(number: $0)
+        })
+    }
+
+    private func replenishPreparedRounds() {
+        guard preparedRounds.count < GameConfig.preparedRoundRunway else { return }
+        let first = (preparedRounds.last?.number ?? roundNumber) + 1
+        guard first <= maximumRounds else { return }
+        let amount = GameConfig.preparedRoundRunway - preparedRounds.count
+        let last = min(maximumRounds, first + amount - 1)
+        preparedRounds.append(contentsOf: (first...last).map {
+            factory.makeRound(number: $0)
+        })
     }
 
     private func advanceHeartFishProgressIfNeeded() {
