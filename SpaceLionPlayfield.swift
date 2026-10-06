@@ -304,7 +304,8 @@ struct SpaceLionPlayfield: View {
     private var outwardDuration: Double { reduceMotion ? 0.20 : 0.98 }
     private var pressDuration: Double { reduceMotion ? 0.04 : 0.055 }
     private var pushOffDuration: Double { reduceMotion ? 0.08 : 0.18 }
-    private var returnDuration: Double { reduceMotion ? 0.16 : 0.64 }
+    // Together, push-off and glide take exactly as long as the outward trip.
+    private var returnDuration: Double { outwardDuration - pushOffDuration }
     private var settleDuration: Double { reduceMotion ? 0.06 : 0.18 }
 
     private func beginOutwardTravel(_ option: AnswerOption,
@@ -361,11 +362,13 @@ struct SpaceLionPlayfield: View {
         phaseStarted = Date()
         // One continuous recoil avoids a velocity reset between push-off and
         // the glide home. The phase change below now affects only the pose.
+        // This is the exact time-reverse of the outward timing curve. The lion
+        // therefore leaves the button at its arrival speed and covers the same
+        // distance home in the same amount of time.
         let recoilAnimation: Animation = reduceMotion
-            ? .easeOut(duration: pushOffDuration + returnDuration)
-            : .spring(response: pushOffDuration + returnDuration,
-                      dampingFraction: 0.86,
-                      blendDuration: 0.06)
+            ? .linear(duration: pushOffDuration + returnDuration)
+            : .timingCurve(0.30, 0.30, 0.70, 0.96,
+                           duration: pushOffDuration + returnDuration)
         let buttonAnimation: Animation = reduceMotion
             ? .easeOut(duration: 0.10)
             : .spring(response: 0.22, dampingFraction: 0.52)
