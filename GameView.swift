@@ -299,7 +299,7 @@ struct GameView: View {
             cockpitPanel {
                 HStack(spacing: isPad ? 10 : 7) {
                     Image(systemName: "function")
-                        .foregroundStyle(character.color)
+                        .foregroundStyle(hudCyan)
                     Text(verbatim: model.round?.question.prompt ?? "—")
                         .font(.system(size: isPad ? 32 : 23,
                                       weight: .black,
@@ -356,7 +356,7 @@ struct GameView: View {
         return cockpitPanel {
             HStack(spacing: isPad ? 8 : 5) {
                 Image(systemName: "timer")
-                    .foregroundStyle(model.timeRemaining <= 10 ? .orange : character.color)
+                    .foregroundStyle(model.timeRemaining <= 10 ? hudOrange : hudCyan)
                 Text(String(format: "%d:%02d", minutes, seconds))
                     .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
                     .monospacedDigit()
@@ -372,7 +372,7 @@ struct GameView: View {
         cockpitPanel {
             HStack(spacing: isPad ? 8 : 5) {
                 Image(systemName: "scope")
-                    .foregroundStyle(character.color)
+                    .foregroundStyle(hudCyan)
                 Text(verbatim: "\(model.cards) / \(request.board.maximum)")
                     .environment(\.layoutDirection, .leftToRight)
                     .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
@@ -391,33 +391,47 @@ struct GameView: View {
     private func cockpitPanel<Content: View>(
         @ViewBuilder content: () -> Content
     ) -> some View {
-        content()
+        let cut: CGFloat = isPad ? 13 : 9
+        return content()
             .foregroundStyle(.white)
             .padding(.horizontal, isPad ? 17 : 10)
             .frame(height: hudControlSize)
             .background {
-                RoundedRectangle(cornerRadius: isPad ? 18 : 13, style: .continuous)
-                    .fill(LinearGradient(
-                        colors: [Color(red: 0.10, green: 0.15, blue: 0.24),
-                                 Color(red: 0.025, green: 0.045, blue: 0.10)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: isPad ? 18 : 13,
-                                         style: .continuous)
-                            .stroke(character.color.opacity(0.86), lineWidth: isPad ? 3 : 2)
-                    }
-                    .overlay(alignment: .top) {
-                        Capsule()
-                            .fill(.white.opacity(0.20))
-                            .frame(height: 2)
-                            .padding(.horizontal, isPad ? 18 : 12)
-                            .padding(.top, 5)
-                    }
-                    .shadow(color: character.color.opacity(0.24), radius: 8)
+                ZStack {
+                    CockpitHUDShape(cut: cut)
+                        .fill(LinearGradient(
+                            colors: [Color(red: 0.13, green: 0.20, blue: 0.38),
+                                     Color(red: 0.025, green: 0.05, blue: 0.13),
+                                     Color(red: 0.012, green: 0.022, blue: 0.065)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                    CockpitHUDShape(cut: cut)
+                        .stroke(Color.black.opacity(0.82), lineWidth: isPad ? 7 : 5)
+                    CockpitHUDShape(cut: cut)
+                        .stroke(hudCyan.opacity(0.82), lineWidth: isPad ? 2.5 : 1.8)
+                        .padding(isPad ? 3 : 2)
+                }
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(hudOrange)
+                        .frame(width: isPad ? 5 : 3, height: hudControlSize * 0.43)
+                        .padding(.leading, isPad ? 7 : 5)
+                        .shadow(color: hudOrange.opacity(0.8), radius: 4)
+                }
+                .overlay(alignment: .bottom) {
+                    Capsule()
+                        .fill(hudCyan.opacity(0.88))
+                        .frame(width: isPad ? 62 : 40, height: isPad ? 3 : 2)
+                        .padding(.bottom, isPad ? 5 : 3)
+                        .shadow(color: hudCyan.opacity(0.75), radius: 4)
+                }
+                .shadow(color: hudCyan.opacity(0.20), radius: 9, y: 3)
             }
     }
+
+    private var hudCyan: Color { Color(red: 0.00, green: 0.75, blue: 1.00) }
+    private var hudOrange: Color { Color(red: 1.00, green: 0.52, blue: 0.07) }
 
     private var showsGameplayHUD: Bool {
         !showsIntro && !playsFishEntrance && !playsLevelCompletion
@@ -428,6 +442,25 @@ struct GameView: View {
     /// the background.
     private var isReefRunning: Bool {
         !showsIntro && (!model.isGameOver || playsLevelCompletion) && scenePhase == .active
+    }
+}
+
+private struct CockpitHUDShape: Shape {
+    let cut: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let c = min(cut, min(rect.width, rect.height) * 0.22)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX + c, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX - c, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + c))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - c))
+        path.addLine(to: CGPoint(x: rect.maxX - c, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX + c, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - c))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + c))
+        path.closeSubpath()
+        return path
     }
 }
 
