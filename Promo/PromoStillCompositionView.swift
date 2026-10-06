@@ -71,7 +71,7 @@ private struct PromoGameplayStill: View {
     /// still has breathing room left of the flush answer column.
     private var hoopX: CGFloat { outputSize.width * (isPadCanvas ? 0.69 : 0.71) }
     /// Answer buttons sit flush against the trailing edge.
-    private var answerButtonX: CGFloat { outputSize.width - hoopSize * 0.42 }
+    private var answerButtonX: CGFloat { outputSize.width - hoopSize * 0.47 }
     private var playerX: CGFloat {
         if kind == .turbo {
             // The gameplay anchor sits directly below the marketing capsule,

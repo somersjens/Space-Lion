@@ -177,11 +177,11 @@ struct FlyingPenguinPlayfield: View {
         let answerBottom = waterline - sceneSize.height * 0.012
         return max(1, (answerBottom - questionBottom) / 3)
     }
-    /// Centre X that parks every answer button with its outer rim against the
-    /// trailing edge of the playfield. The authored canvases carry a small
-    /// transparent margin, so the centre sits slightly past half-width.
+    /// Centre X that parks every answer button flush against the trailing
+    /// edge. A small inset past half-width compensates for the transparent
+    /// margin in the authored canvases without clipping the visible rim away.
     private var answerButtonX: CGFloat {
-        sceneSize.width - hoopSize * 0.42
+        sceneSize.width - hoopSize * 0.47
     }
     private var waterline: CGFloat { sceneSize.height * 0.90 }
     private var normalPenguinX: CGFloat { sceneSize.width * 0.25 }
@@ -934,8 +934,8 @@ struct FlyingPenguinPlayfield: View {
     /// arbitrarily smaller than the other two.
     private func answerTextScale(for options: [AnswerOption]) -> CGFloat {
         guard hoopSize > 0, !options.isEmpty else { return 1 }
-        let baseSize = hoopSize * 0.22
-        let availableWidth = hoopSize * 0.54
+        let baseSize = hoopSize * 0.28
+        let availableWidth = hoopSize * 0.56
 
 #if canImport(UIKit)
         let baseFont = UIFont.systemFont(ofSize: baseSize, weight: .heavy)
@@ -2610,8 +2610,8 @@ private struct SolvedAnswerEchoView: View {
 }
 
 /// Physical arcade answer button — same layered housing / cap / lip press as
-/// the Nuts & Numbers grab control, with the answer number on the face instead
-/// of a word.
+/// the Nuts & Numbers grab control, with the answer number centred on the face
+/// instead of a word.
 struct AnswerHoop: View {
     let text: String
     let tint: Color
@@ -2624,8 +2624,10 @@ struct AnswerHoop: View {
         static let canvas: CGFloat = 1254
         /// Cap travel into the housing, in canvas pixels.
         static let pressTravel: CGFloat = 88
-        /// Centre of the red top face, as a fraction of the square canvas.
-        static let labelCenterY: CGFloat = 470 / 1254
+        /// Optical centre of the red top face. The authored canvas is drawn in
+        /// perspective, so the face sits a little above mid-frame — enough for
+        /// a digit to read as centred on the button, without floating high.
+        static let labelCenterY: CGFloat = 0.435
     }
 
     private var travel: CGFloat { size * (Art.pressTravel / Art.canvas) }
@@ -2675,7 +2677,7 @@ struct AnswerHoop: View {
                         .blendMode(.color)
                 }
                 Text(text)
-                    .font(.system(size: size * 0.22 * textScale,
+                    .font(.system(size: size * 0.28 * textScale,
                                   weight: .black,
                                   design: .rounded))
                     .foregroundStyle(.white)
@@ -2684,7 +2686,7 @@ struct AnswerHoop: View {
                     .minimumScaleFactor(0.32)
                     .allowsTightening(true)
                     .multilineTextAlignment(.center)
-                    .frame(width: size * 0.54)
+                    .frame(width: size * 0.56, height: size * 0.34)
                     .offset(y: faceOffset)
                 if feedback == .bonus {
                     BonusStarBurst(size: size * 0.85)

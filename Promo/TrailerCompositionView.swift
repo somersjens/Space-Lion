@@ -545,7 +545,7 @@ struct TrailerCompositionView: View {
             .shadow(color: .black.opacity(0.12), radius: fontSize * 0.12, y: fontSize * 0.06)
     }
 
-    private var answerButtonX: CGFloat { outputSize.width - hoopSize * 0.42 }
+    private var answerButtonX: CGFloat { outputSize.width - hoopSize * 0.47 }
 
     private func hoopColumn(texts: [String],
                             character: AnimalCharacter,
