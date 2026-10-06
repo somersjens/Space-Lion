@@ -100,9 +100,7 @@ struct PremiumView: View {
     var body: some View {
         let _ = totalCards
         ZStack(alignment: .top) {
-            LinearGradient(colors: [character.skyColor, character.tintColor],
-                           startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
+            SpaceMenuBackground(accent: character.color)
 
             GeometryReader { proxy in
                 let available = min(AppLayout.landscapeContentWidth,
@@ -132,9 +130,9 @@ struct PremiumView: View {
                                        columns: isSplit ? CharacterCatalog.all.count : 5)
                     }
                     .padding(metrics.cardPadding)
-                    .background(.white.opacity(0.52),
-                                in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                    .shadow(color: character.deepColor.opacity(0.1), radius: 16, y: 7)
+                    .spaceMenuPanel(accent: character.color,
+                                    cornerRadius: 28,
+                                    prominent: true)
                     .padding(AppLayout.landscapeGutter)
                     .frame(width: available + AppLayout.landscapeGutter * 2)
                     .frame(maxWidth: .infinity)
@@ -241,6 +239,7 @@ struct PremiumView: View {
             // is enlarged to let the outstretched arms overlap the decorative
             // ring slightly instead of floating small inside it.
             ZStack {
+                SpaceOrbitHalo(accent: character.color, diameter: heroSize)
                 Circle()
                     .fill(RadialGradient(
                         colors: [character.color.opacity(0.35), character.color.opacity(0.05)],
@@ -283,15 +282,18 @@ struct PremiumView: View {
         let itemGap = metrics.featureSpacing * 0.75
         return VStack(alignment: .center, spacing: 0) {
             Spacer(minLength: itemGap)
-            featureRow(title: L("premium.feature.levels.title"),
+            featureRow(icon: "square.grid.3x3.fill",
+                       title: L("premium.feature.levels.title"),
                        subtitle: L("premium.feature.levels.subtitle"),
                        metrics: metrics)
             Spacer(minLength: itemGap)
-            featureRow(title: L("premium.feature.animals.title"),
+            featureRow(icon: "pawprint.fill",
+                       title: L("premium.feature.animals.title"),
                        subtitle: L("premium.feature.animals.subtitle"),
                        metrics: metrics)
             Spacer(minLength: itemGap)
-            featureRow(title: L("premium.feature.noAds.title"),
+            featureRow(icon: "checkmark.seal.fill",
+                       title: L("premium.feature.noAds.title"),
                        subtitle: L("premium.feature.noAds.subtitle"),
                        metrics: metrics)
             Spacer(minLength: itemGap)
@@ -300,8 +302,13 @@ struct PremiumView: View {
         }
         .padding(metrics.panelPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.white.opacity(0.42),
-                    in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(
+            LinearGradient(colors: [Color.white.opacity(0.68),
+                                    character.tintColor.opacity(0.42)],
+                           startPoint: .topLeading,
+                           endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(
@@ -381,8 +388,17 @@ struct PremiumView: View {
             }
         }
         .padding(metrics.stripPadding)
-        .background(.white.opacity(0.34),
-                    in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(
+            LinearGradient(colors: [Color.white.opacity(0.48),
+                                    SpaceMenuPalette.starlight.opacity(0.22)],
+                           startPoint: .top,
+                           endPoint: .bottom),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(character.color.opacity(0.20), lineWidth: 1)
+        }
     }
 
     private func characterTile(for animal: AnimalCharacter,
@@ -569,18 +585,40 @@ struct PremiumView: View {
         }
     }
 
-    private func featureRow(title: String, subtitle: String,
+    private func featureRow(icon: String, title: String, subtitle: String,
                             metrics: PremiumMetrics) -> some View {
-        VStack(alignment: .center, spacing: metrics.footnote * 0.28) {
-            Text(title)
-                .font(.system(size: metrics.featureTitle, weight: .bold))
-                .foregroundStyle(character.deepColor)
-            Text(subtitle)
-                .font(.system(size: metrics.featureSubtitle))
-                .foregroundStyle(character.deepColor.opacity(0.7))
-                .fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: metrics.panelSpacing) {
+            Image(systemName: icon)
+                .font(.system(size: metrics.featureTitle * 0.88, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: metrics.featureTitle * 2.25,
+                       height: metrics.featureTitle * 2.25)
+                .background(
+                    LinearGradient(colors: [character.color, character.deepColor],
+                                   startPoint: .topLeading,
+                                   endPoint: .bottomTrailing),
+                    in: RoundedRectangle(cornerRadius: metrics.featureTitle * 0.68,
+                                         style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: metrics.featureTitle * 0.68,
+                                     style: .continuous)
+                        .stroke(.white.opacity(0.5), lineWidth: 1)
+                }
+
+            VStack(alignment: .leading, spacing: metrics.footnote * 0.18) {
+                Text(title)
+                    .font(.system(size: metrics.featureTitle, weight: .bold))
+                    .foregroundStyle(character.deepColor)
+                Text(subtitle)
+                    .font(.system(size: metrics.featureSubtitle))
+                    .foregroundStyle(character.deepColor.opacity(0.7))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
         }
-        .multilineTextAlignment(.center)
+        .multilineTextAlignment(.leading)
         .frame(maxWidth: .infinity)
     }
 

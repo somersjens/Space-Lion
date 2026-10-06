@@ -161,7 +161,7 @@ struct HomeView: View {
 
     var body: some View {
         ZStack {
-            MenuPolarBackground(accent: character.color)
+            SpaceMenuBackground(accent: character.color)
 
             GeometryReader { proxy in
                 ScrollView {
@@ -303,15 +303,7 @@ struct HomeView: View {
             .frame(maxWidth: .infinity)
         }
         .padding(menuCardPadding)
-        .background {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(.white.opacity(0.76))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(.white.opacity(0.9), lineWidth: 1)
-                }
-        }
-        .shadow(color: character.deepColor.opacity(0.12), radius: 14, y: 7)
+        .spaceMenuPanel(accent: character.color, cornerRadius: 24, prominent: true)
     }
 
     /// The player side is exactly as tall as the two rows of controls across the
@@ -367,15 +359,25 @@ struct HomeView: View {
         // the outstretched arms are free to reach beyond the tile's border.
         return ZStack {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(LinearGradient(colors: [character.skyColor, character.tintColor],
-                                     startPoint: .top, endPoint: .bottom))
+                .fill(LinearGradient(colors: [SpaceMenuPalette.horizon,
+                                              character.deepColor,
+                                              SpaceMenuPalette.void],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
                 .overlay {
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(.white.opacity(0.9), lineWidth: 2)
+                        .stroke(
+                            LinearGradient(colors: [.white.opacity(0.92),
+                                                    character.color.opacity(0.72)],
+                                           startPoint: .topLeading,
+                                           endPoint: .bottomTrailing),
+                            lineWidth: 2
+                        )
                 }
+            SpaceOrbitHalo(accent: character.color, diameter: box * 0.92)
             CharacterPortrait(character: character,
                               side: box * 0.84,
                               magnification: 1.55)
+                .shadow(color: character.color.opacity(0.38), radius: 8, y: 3)
         }
         .frame(width: box, height: box)
         .shadow(color: character.deepColor.opacity(0.18), radius: 7, y: 3)

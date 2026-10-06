@@ -148,7 +148,7 @@ struct LevelIntroCard: View {
         ]
 
         return ZStack {
-            Color.black.opacity(0.55).ignoresSafeArea()
+            SpaceModalBackdrop(accent: theme.color)
 
             GeometryReader { proxy in
                 ScrollView {
@@ -194,13 +194,9 @@ struct LevelIntroCard: View {
                     }
                     .padding(24 * scale)
                     .frame(maxWidth: isPad ? 900 : 760)
-                    // Explicit white: `.background` follows Dark Mode and the
-                    // deep-purple copy on this card becomes unreadable.
-                    .background(Color.white.opacity(0.93), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .stroke(theme.deepColor.opacity(0.14), lineWidth: 1))
-                    .shadow(color: theme.deepColor.opacity(0.28), radius: 18, y: 8)
+                    .spaceMenuPanel(accent: theme.color,
+                                    cornerRadius: 28,
+                                    prominent: true)
                     .padding(AppLayout.landscapeGutter)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: proxy.size.height, alignment: .center)
@@ -257,8 +253,17 @@ struct LevelIntroCard: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14 * actionScale)
                     .foregroundStyle(.white)
-                    .background(theme.deepColor,
-                                in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(
+                        LinearGradient(colors: [theme.color, theme.deepColor],
+                                       startPoint: .topLeading,
+                                       endPoint: .bottomTrailing),
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(.white.opacity(0.42), lineWidth: 1)
+                    }
+                    .shadow(color: theme.color.opacity(0.28), radius: 8, y: 4)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("intro-start")
@@ -323,14 +328,22 @@ struct LevelIntroCard: View {
     // MARK: - Pieces
 
     private var characterPortrait: some View {
-        theme.artwork
-            .resizable()
-            .scaledToFit()
-            .padding(5)
-            .frame(width: portraitSize, height: portraitSize)
-            .background(theme.skyColor, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(theme.deepColor.opacity(0.12), lineWidth: 1))
+        ZStack {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(LinearGradient(colors: [SpaceMenuPalette.horizon,
+                                              theme.deepColor,
+                                              SpaceMenuPalette.void],
+                                     startPoint: .topLeading,
+                                     endPoint: .bottomTrailing))
+            SpaceOrbitHalo(accent: theme.color, diameter: portraitSize * 0.88)
+            CharacterPortrait(character: theme,
+                              side: portraitSize * 0.84,
+                              magnification: 1.45)
+        }
+        .frame(width: portraitSize, height: portraitSize)
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .stroke(.white.opacity(0.65), lineWidth: 1.5))
+        .shadow(color: theme.color.opacity(0.22), radius: 7, y: 3)
     }
 
     /// Music and sound effects are controlled separately, so a player can keep
@@ -429,11 +442,16 @@ struct LevelIntroCard: View {
                     }
                 }
             }
-            .foregroundStyle(theme.deepColor)
+            .foregroundStyle(.white)
             .frame(width: 54 * scale, height: 54 * scale)
-            .background(theme.skyColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(
+                LinearGradient(colors: [theme.color, theme.deepColor],
+                               startPoint: .topLeading,
+                               endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(theme.deepColor.opacity(0.14), lineWidth: 1))
+                .stroke(.white.opacity(0.44), lineWidth: 1))
 
             Text(emphasizedAttributedString(feature.text))
                 .font(.system(size: 15 * textScale * featureTextScale, weight: .regular))
@@ -443,7 +461,13 @@ struct LevelIntroCard: View {
         }
         .padding(.horizontal, 10 * scale)
         .padding(.vertical, 6 * scale)
-        .background(theme.skyColor.opacity(0.32), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            LinearGradient(colors: [theme.skyColor.opacity(0.58),
+                                    SpaceMenuPalette.starlight.opacity(0.22)],
+                           startPoint: .leading,
+                           endPoint: .trailing),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
             .stroke(theme.deepColor.opacity(0.10), lineWidth: 1))
     }

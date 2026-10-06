@@ -37,19 +37,24 @@ struct OnboardingView: View {
                 ScrollView {
                     let horizontalPadding: CGFloat = isPad ? 48 : 24
                     let columnSpacing: CGFloat = isPad ? 48 : 24
+                    let panelInset: CGFloat = isPad ? 28 : 18
                     let artworkSide = min(isPad ? 230 : 170,
                                           max(isPad ? 170 : 110, proxy.size.height * 0.42))
                     let stepWidth = min(contentWidth,
                         max(300, proxy.size.width - horizontalPadding * 2
-                            - artworkSide - columnSpacing))
+                            - artworkSide - columnSpacing - panelInset * 2))
 
                     HStack(alignment: .center, spacing: columnSpacing) {
-                        CharacterCatalog.character(id: CharacterCatalog.freeCharacterID)
-                            .artwork
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: artworkSide, height: artworkSide)
-                            .animation(.spring(response: 0.42, dampingFraction: 0.82), value: step)
+                        ZStack {
+                            SpaceOrbitHalo(accent: .orange, diameter: artworkSide)
+                            CharacterCatalog.character(id: CharacterCatalog.freeCharacterID)
+                                .artwork
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: artworkSide, height: artworkSide)
+                                .animation(.spring(response: 0.42, dampingFraction: 0.82), value: step)
+                        }
+                        .frame(width: artworkSide, height: artworkSide)
 
                         Group {
                             switch step {
@@ -62,6 +67,8 @@ struct OnboardingView: View {
                         .transition(.opacity.combined(with: .move(edge: .trailing)))
                         .frame(width: stepWidth)
                     }
+                    .padding(panelInset)
+                    .spaceMenuPanel(accent: .orange, cornerRadius: 30, prominent: true)
                     .padding(.horizontal, horizontalPadding)
                     // Reserve the complete flag/back-button band. Long titles
                     // can wrap without ever sliding underneath either control.
@@ -73,7 +80,11 @@ struct OnboardingView: View {
                 .scrollBounceBehavior(.basedOnSize)
             }
         }
-        .foregroundStyle(PolarScene.ink)
+        .foregroundStyle(SpaceMenuPalette.ink)
+        .overlay(alignment: .top) {
+            onboardingProgress
+                .padding(.top, isPad ? 30 : 17)
+        }
         .overlay(alignment: .topLeading) {
             // Steps 2 and 3 can step back to correct a wrong choice. Mirrors
             // the language flag: same glass style, same top inset, left corner.
@@ -85,7 +96,7 @@ struct OnboardingView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            LanguagePicker(tint: PolarScene.ink.opacity(0.6),
+            LanguagePicker(tint: .white.opacity(0.88),
                            scale: isPad ? 1.25 : 1)
                 .padding(.top, isPad ? 20 : 8)
                 .padding(.trailing, isPad ? 28 : 16)
@@ -98,7 +109,7 @@ struct OnboardingView: View {
         } label: {
             Image(systemName: "chevron.backward")
                 .font(.system(size: isPad ? 26 : 22, weight: .semibold))
-                .foregroundStyle(PolarScene.ink.opacity(0.6))
+                .foregroundStyle(.white.opacity(0.88))
                 .padding(.horizontal, isPad ? 16 : 13)
                 .padding(.vertical, isPad ? 11 : 8)
                 .liquidGlassCapsule()
@@ -107,7 +118,27 @@ struct OnboardingView: View {
     }
 
     private var onboardingBackground: some View {
-        MenuPolarBackground(accent: Color.orange)
+        SpaceMenuBackground(accent: .orange)
+    }
+
+    /// A compact mission-progress rail that makes the three welcome pages read
+    /// as one launch sequence without adding new localized copy.
+    private var onboardingProgress: some View {
+        HStack(spacing: isPad ? 9 : 7) {
+            ForEach(0..<3, id: \.self) { index in
+                Capsule()
+                    .fill(index <= step ? Color.orange : Color.white.opacity(0.28))
+                    .frame(width: index == step ? (isPad ? 36 : 28) : (isPad ? 12 : 9),
+                           height: isPad ? 8 : 6)
+                    .shadow(color: index == step ? Color.orange.opacity(0.7) : .clear,
+                            radius: 5)
+            }
+        }
+        .padding(.horizontal, isPad ? 16 : 13)
+        .padding(.vertical, isPad ? 10 : 8)
+        .background(SpaceMenuPalette.void.opacity(0.62), in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 1))
+        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: step)
     }
 
     private var nameStep: some View {
@@ -464,7 +495,7 @@ private struct OnboardingChoiceLabel: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.orange.opacity(isSelected ? 0.9 : 0), lineWidth: 2.5)
         )
-        .foregroundStyle(PolarScene.ink)
+        .foregroundStyle(SpaceMenuPalette.ink)
         .animation(.easeInOut(duration: 0.18), value: isSelected)
     }
 }

@@ -70,36 +70,18 @@ struct ResultView: View {
 
     var body: some View {
         ZStack {
-            Color.black
-                .opacity(backdropPresented ? 0.30 : 0)
-                .ignoresSafeArea()
-
-            // A cool tint ties the overlay back to the level instead of
-            // replacing the colourful scene with a flat black curtain.
-            LinearGradient(
-                colors: [character.deepColor.opacity(backdropPresented ? 0.14 : 0),
-                         .clear,
-                         character.tintColor.opacity(backdropPresented ? 0.08 : 0)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            SpaceModalBackdrop(accent: character.color,
+                               opacity: backdropPresented ? 0.82 : 0)
+                .animation(.easeInOut(duration: 0.42), value: backdropPresented)
 
             GeometryReader { proxy in
                 ScrollView {
                     card
                         .padding(22 * scale)
                         .frame(maxWidth: isPad ? 820 : 700)
-                        .background(
-                            LinearGradient(colors: [character.skyColor, .white, character.tintColor],
-                                           startPoint: .top, endPoint: .bottom),
-                            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                                .stroke(.white.opacity(0.82), lineWidth: 1)
-                        }
-                        .shadow(color: .black.opacity(0.22), radius: 24, y: 12)
+                        .spaceMenuPanel(accent: character.color,
+                                        cornerRadius: 28,
+                                        prominent: true)
                         .padding(24)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: proxy.size.height, alignment: .center)
@@ -208,6 +190,7 @@ struct ResultView: View {
         // enlarged to let the outstretched arms reach just beyond the
         // decorative ring instead of leaving the character looking tiny.
         return ZStack {
+            SpaceOrbitHalo(accent: character.color, diameter: heroSize)
             Circle()
                 .fill(RadialGradient(
                     colors: [character.color.opacity(0.35), character.color.opacity(0.05)],

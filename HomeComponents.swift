@@ -604,15 +604,34 @@ struct LevelCardView: View {
                 .padding(.leading, 9 * cardScale)
         }
         .background(cardFill, in: RoundedRectangle(cornerRadius: 18 * cardScale))
+        .overlay(alignment: .bottomTrailing) {
+            // A quiet orbit line keeps every level tile in the same visual
+            // world as the large menu panels without competing with its score.
+            Ellipse()
+                .stroke(theme.color.opacity(displayedBest == 0 ? 0.10 : 0.16),
+                        lineWidth: max(1, cardScale))
+                .frame(width: 82 * cardScale, height: 28 * cardScale)
+                .rotationEffect(.degrees(-18))
+                .offset(x: 24 * cardScale, y: 10 * cardScale)
+                .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18 * cardScale))
         .overlay(
             RoundedRectangle(cornerRadius: 18 * cardScale)
                 .stroke(borderColor, lineWidth: (status == .recommended ? 2.5 : 1) * cardScale)
         )
-        .shadow(color: .black.opacity(0.06), radius: 5, x: 0, y: 3)
+        .shadow(color: theme.color.opacity(status == .recommended ? 0.22 : 0.10),
+                radius: 6, x: 0, y: 3)
     }
 
-    private var cardFill: Color {
-        displayedBest == 0 ? Color.white.opacity(0.6) : .white
+    private var cardFill: LinearGradient {
+        LinearGradient(
+            colors: displayedBest == 0
+                ? [Color.white.opacity(0.76), SpaceMenuPalette.starlight.opacity(0.48)]
+                : [Color.white, theme.skyColor.opacity(0.92)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     private var borderColor: Color {
