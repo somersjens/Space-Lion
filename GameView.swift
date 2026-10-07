@@ -296,19 +296,8 @@ struct GameView: View {
         HStack(spacing: isPad ? 12 : 7) {
             pauseButton
 
-            cockpitPanel {
-                HStack(spacing: isPad ? 10 : 7) {
-                    Image(systemName: "function")
-                        .foregroundStyle(hudCyan)
-                    highlightedQuestion(model.round?.question.prompt ?? "—")
-                        .font(.system(size: isPad ? 32 : 23,
-                                      weight: .black,
-                                      design: .rounded))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.54)
-                        .accessibilityIdentifier("space-lion-question")
-                }
-                .frame(maxWidth: .infinity)
+            cockpitPanel(holographic: true) {
+                questionReadout
             }
             .frame(maxWidth: .infinity)
 
@@ -332,56 +321,98 @@ struct GameView: View {
             showsIntro = true
         } label: {
             cockpitPanel {
-                Image(systemName: "pause.fill")
-                    .font(.system(size: pauseGlyphSize, weight: .black))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .accessibilityLabel(Text("Pause"))
+                ZStack {
+                    Circle()
+                        .fill(RadialGradient(
+                            colors: [Color(red: 0.45, green: 0.82, blue: 1.00),
+                                     Color(red: 0.05, green: 0.38, blue: 0.95),
+                                     Color(red: 0.02, green: 0.12, blue: 0.42)],
+                            center: UnitPoint(x: 0.38, y: 0.32),
+                            startRadius: 0,
+                            endRadius: hudControlSize * 0.46
+                        ))
+                        .padding(isPad ? 9 : 7)
+                        .overlay {
+                            Circle()
+                                .stroke(.white.opacity(0.55), lineWidth: isPad ? 1.4 : 1)
+                                .padding(isPad ? 11 : 8)
+                        }
+                        .shadow(color: hudCyan.opacity(0.85), radius: isPad ? 10 : 7)
+                    Image(systemName: "pause.fill")
+                        .font(.system(size: pauseGlyphSize, weight: .black))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.35), radius: 0, y: 1)
+                        .accessibilityLabel(Text("Pause"))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(width: hudControlSize)
             .contentShape(RoundedRectangle(cornerRadius: isPad ? 18 : 13,
                                            style: .continuous))
         }
         .buttonStyle(CockpitPressStyle())
+        .hoverEffect(.lift)
         .accessibilityIdentifier("pause")
     }
 
     private var hudControlSize: CGFloat { isPad ? 72 : 54 }
     private var pauseGlyphSize: CGFloat { isPad ? 28 : 20 }
-    private var hudNumberSize: CGFloat { isPad ? 27 : 19 }
+    private var hudNumberSize: CGFloat { isPad ? 28 : 20 }
+
+    /// 0 while plenty of time remains, 1 when the clock is about to run out.
+    /// The lamp shifts through that range instead of flipping colour at a cliff.
+    private var timerUrgency: Double {
+        let total = max(1, request.board.maximum * 10)
+        let fraction = Double(model.timeRemaining) / Double(total)
+        return min(1, max(0, (0.30 - fraction) / 0.30))
+    }
+
+    private var timerLamp: Color {
+        let urgency = timerUrgency
+        return Color(red: 0.00 + urgency * 1.00,
+                     green: 0.78 - urgency * 0.28,
+                     blue: 1.00 - urgency * 0.90)
+    }
 
     private var timerCounter: some View {
         let minutes = model.timeRemaining / 60
         let seconds = model.timeRemaining % 60
         let total = max(1, request.board.maximum * 10)
         let progress = CGFloat(min(1, max(0, Double(model.timeRemaining) / Double(total))))
-        let isUrgent = model.timeRemaining <= 10
+        let lamp = timerLamp
         return cockpitPanel {
             HStack(spacing: isPad ? 8 : 5) {
-                ZStack {
-                    Circle()
-                        .stroke(.white.opacity(0.12), lineWidth: isPad ? 4 : 3)
-                    Circle()
-                        .trim(from: 0, to: progress)
-                        .stroke(isUrgent ? hudOrange : hudCyan,
-                                style: StrokeStyle(lineWidth: isPad ? 4 : 3,
-                                                   lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .shadow(color: (isUrgent ? hudOrange : hudCyan).opacity(0.8),
-                                radius: isPad ? 5 : 3)
-                    Image(systemName: "timer")
-                        .font(.system(size: isPad ? 24 : 17, weight: .bold))
-                        .foregroundStyle(isUrgent ? hudOrange : hudCyan)
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0,
+                                        paused: !isReefRunning || reduceMotion)) { timeline in
+                    let spin = timeline.date.timeIntervalSinceReferenceDate * 70
+                    ZStack {
+                        Circle()
+                            .stroke(.white.opacity(0.14), lineWidth: isPad ? 4 : 3)
+                        Circle()
+                            .trim(from: 0, to: progress)
+                            .stroke(lamp,
+                                    style: StrokeStyle(lineWidth: isPad ? 4 : 3,
+                                                       lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .shadow(color: lamp.opacity(0.85), radius: isPad ? 5 : 3)
+                        Circle()
+                            .trim(from: 0, to: 0.18)
+                            .stroke(.white.opacity(0.95),
+                                    style: StrokeStyle(lineWidth: isPad ? 2.4 : 1.8,
+                                                       lineCap: .round))
+                            .rotationEffect(.degrees(spin))
+                            .shadow(color: lamp, radius: 3)
+                        Image(systemName: "timer")
+                            .font(.system(size: isPad ? 22 : 16, weight: .bold))
+                            .foregroundStyle(lamp)
+                    }
                 }
-                .frame(width: isPad ? 39 : 29, height: isPad ? 39 : 29)
-                .scaleEffect(isUrgent ? 1.04 : 1)
-                .animation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true),
-                           value: isUrgent)
+                .frame(width: isPad ? 40 : 30, height: isPad ? 40 : 30)
                 Text(String(format: "%d:%02d", minutes, seconds))
                     .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
                     .monospacedDigit()
                     .contentTransition(.numericText())
-                    .foregroundStyle(isUrgent ? hudOrange : .white)
+                    .foregroundStyle(timerUrgency > 0.55 ? lamp : .white)
             }
             .frame(maxWidth: .infinity)
         }
@@ -413,44 +444,86 @@ struct GameView: View {
     }
 
     private var progressSegments: some View {
-        let count = 6
+        let count = 4
         let maximum = max(1, request.board.maximum)
         let progress = min(1, max(0, Double(model.cards) / Double(maximum)))
-        return HStack(spacing: isPad ? 4 : 3) {
+        return HStack(spacing: isPad ? 5 : 3) {
             ForEach(0..<count, id: \.self) { index in
                 let threshold = Double(index + 1) / Double(count)
+                let filled = progress + 0.0001 >= threshold
                 Capsule()
-                    .fill(progress + 0.0001 >= threshold
-                          ? Color(red: 0.30, green: 1.00, blue: 0.56)
-                          : Color(red: 0.16, green: 0.25, blue: 0.40))
-                    .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 0.7))
-                    .shadow(color: progress + 0.0001 >= threshold
-                            ? Color(red: 0.30, green: 1.00, blue: 0.56).opacity(0.8)
+                    .fill(filled
+                          ? LinearGradient(colors: [Color(red: 0.55, green: 1.00, blue: 0.78),
+                                                    Color(red: 0.10, green: 0.92, blue: 0.62)],
+                                           startPoint: .leading,
+                                           endPoint: .trailing)
+                          : LinearGradient(colors: [Color(red: 0.12, green: 0.18, blue: 0.30),
+                                                    Color(red: 0.08, green: 0.12, blue: 0.22)],
+                                           startPoint: .leading,
+                                           endPoint: .trailing))
+                    .overlay(Capsule().stroke(.white.opacity(filled ? 0.45 : 0.12), lineWidth: 0.7))
+                    .shadow(color: filled
+                            ? Color(red: 0.30, green: 1.00, blue: 0.70).opacity(0.9)
                             : .clear,
-                            radius: isPad ? 4 : 2)
+                            radius: isPad ? 5 : 3)
+                    .scaleEffect(y: filled ? 1 : 0.82)
             }
         }
-        .frame(height: isPad ? 8 : 6)
-        .animation(.spring(response: 0.34, dampingFraction: 0.72), value: model.cards)
+        .frame(height: isPad ? 9 : 7)
+        .animation(.spring(response: 0.34, dampingFraction: 0.68), value: model.cards)
         .accessibilityHidden(true)
     }
 
-    private func highlightedQuestion(_ prompt: String) -> Text {
-        guard let marker = prompt.range(of: "?") else {
-            return Text(verbatim: prompt).foregroundColor(.white)
+    private var questionReadout: some View {
+        HStack(spacing: isPad ? 10 : 6) {
+            Image(systemName: "sparkle")
+                .font(.system(size: isPad ? 16 : 12, weight: .bold))
+                .foregroundStyle(hudCyan)
+                .shadow(color: hudCyan.opacity(0.8), radius: 4)
+            questionLabel(model.round?.question.prompt ?? "—")
+                .id(model.round?.id)
+                .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                .lineLimit(1)
+                .minimumScaleFactor(0.42)
+                .accessibilityIdentifier("space-lion-question")
         }
-        let leading = String(prompt[..<marker.lowerBound])
-        let trailing = String(prompt[marker.upperBound...])
-        return Text(verbatim: leading).foregroundColor(.white)
-            + Text(verbatim: "?")
-                .foregroundColor(hudOrange)
-            + Text(verbatim: trailing).foregroundColor(.white)
+        .frame(maxWidth: .infinity)
+        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: model.round?.id)
+    }
+
+    private func questionLabel(_ prompt: String) -> some View {
+        let marker = prompt.range(of: "?")
+        let leading = marker.map { String(prompt[..<$0.lowerBound]) } ?? prompt
+        let trailing = marker.map { String(prompt[$0.upperBound...]) } ?? ""
+        return HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Text(verbatim: leading)
+                .foregroundStyle(.white)
+            if marker != nil {
+                Text(verbatim: "?")
+                    .foregroundStyle(hudOrange)
+                    .shadow(color: hudOrange.opacity(0.95), radius: isPad ? 8 : 5)
+            }
+            if !trailing.isEmpty {
+                Text(verbatim: trailing)
+                    .foregroundStyle(.white)
+            }
+        }
+        .font(.system(size: isPad ? 38 : 27, weight: .black, design: .rounded))
+        .shadow(color: .black.opacity(0.55), radius: 0, y: 1)
     }
 
     private func cockpitPanel<Content: View>(
+        holographic: Bool = false,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        let cut: CGFloat = isPad ? 13 : 9
+        let cut: CGFloat = isPad ? 14 : 10
+        let fill = holographic
+            ? [Color(red: 0.10, green: 0.16, blue: 0.42),
+               Color(red: 0.04, green: 0.05, blue: 0.18),
+               Color(red: 0.07, green: 0.03, blue: 0.16)]
+            : [Color(red: 0.14, green: 0.20, blue: 0.38),
+               Color(red: 0.03, green: 0.05, blue: 0.12),
+               Color(red: 0.012, green: 0.02, blue: 0.06)]
         return content()
             .foregroundStyle(.white)
             .padding(.horizontal, isPad ? 17 : 10)
@@ -458,34 +531,41 @@ struct GameView: View {
             .background {
                 ZStack {
                     CockpitHUDShape(cut: cut)
-                        .fill(LinearGradient(
-                            colors: [Color(red: 0.13, green: 0.20, blue: 0.38),
-                                     Color(red: 0.025, green: 0.05, blue: 0.13),
-                                     Color(red: 0.012, green: 0.022, blue: 0.065)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ))
+                        .fill(LinearGradient(colors: fill,
+                                             startPoint: .top,
+                                             endPoint: .bottom))
                     CockpitHUDShape(cut: cut)
-                        .stroke(Color.black.opacity(0.82), lineWidth: isPad ? 7 : 5)
+                        .fill(LinearGradient(colors: [.white.opacity(holographic ? 0.16 : 0.10),
+                                                      .clear],
+                                             startPoint: .top,
+                                             endPoint: .center))
                     CockpitHUDShape(cut: cut)
-                        .stroke(hudCyan.opacity(0.82), lineWidth: isPad ? 2.5 : 1.8)
-                        .padding(isPad ? 3 : 2)
+                        .stroke(Color.black.opacity(0.88), lineWidth: isPad ? 8 : 5)
+                    CockpitHUDShape(cut: cut)
+                        .stroke(hudCyan.opacity(0.95), lineWidth: isPad ? 2.6 : 1.8)
+                        .padding(isPad ? 3.5 : 2.2)
+                        .shadow(color: hudCyan.opacity(0.65), radius: isPad ? 6 : 4)
+                    CockpitHUDShape(cut: cut)
+                        .stroke(.white.opacity(0.22), lineWidth: 1)
+                        .padding(isPad ? 6 : 4)
                 }
                 .overlay(alignment: .leading) {
                     Capsule()
                         .fill(hudOrange)
-                        .frame(width: isPad ? 5 : 3, height: hudControlSize * 0.43)
+                        .frame(width: isPad ? 5 : 3, height: hudControlSize * 0.46)
                         .padding(.leading, isPad ? 7 : 5)
-                        .shadow(color: hudOrange.opacity(0.8), radius: 4)
+                        .shadow(color: hudOrange.opacity(0.9), radius: 5)
                 }
                 .overlay(alignment: .bottom) {
-                    Capsule()
-                        .fill(hudCyan.opacity(0.88))
-                        .frame(width: isPad ? 62 : 40, height: isPad ? 3 : 2)
+                    CockpitPanelEnergyRail(
+                        color: holographic ? hudOrange : hudCyan,
+                        isRunning: isReefRunning && !reduceMotion
+                    )
+                        .frame(width: isPad ? 72 : 46, height: isPad ? 3 : 2)
                         .padding(.bottom, isPad ? 5 : 3)
-                        .shadow(color: hudCyan.opacity(0.75), radius: 4)
                 }
-                .shadow(color: hudCyan.opacity(0.20), radius: 9, y: 3)
+                .shadow(color: .black.opacity(0.45), radius: 8, y: 4)
+                .shadow(color: hudCyan.opacity(0.28), radius: 10, y: 2)
             }
     }
 
@@ -531,6 +611,47 @@ private struct CockpitPressStyle: ButtonStyle {
             .offset(y: configuration.isPressed ? 2 : 0)
             .animation(.spring(response: 0.18, dampingFraction: 0.66),
                        value: configuration.isPressed)
+    }
+}
+
+/// A restrained status rail for the HUD: one long highlight crosses the panel
+/// slowly, like power moving through a ship console. It freezes cleanly when
+/// the game is paused or Reduce Motion is enabled.
+private struct CockpitPanelEnergyRail: View {
+    let color: Color
+    let isRunning: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            TimelineView(.animation(minimumInterval: 1.0 / 20.0,
+                                    paused: !isRunning)) { timeline in
+                let duration = 5.8
+                let elapsed = timeline.date.timeIntervalSinceReferenceDate
+                let phase = isRunning
+                    ? elapsed.truncatingRemainder(dividingBy: duration) / duration
+                    : 0.42
+                let segmentWidth = max(10, proxy.size.width * 0.38)
+                let travel = proxy.size.width + segmentWidth * 2
+                let x = -segmentWidth + travel * phase
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(color.opacity(0.20))
+
+                    Capsule()
+                        .fill(LinearGradient(
+                            colors: [color.opacity(0), color, .white, color, color.opacity(0)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ))
+                        .frame(width: segmentWidth)
+                        .offset(x: x)
+                        .shadow(color: color.opacity(0.72), radius: 4)
+                }
+                .clipShape(Capsule())
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 
