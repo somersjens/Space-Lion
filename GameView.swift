@@ -353,30 +353,11 @@ struct GameView: View {
             showsIntro = true
         } label: {
             cockpitPanel {
-                ZStack {
-                    Circle()
-                        .fill(RadialGradient(
-                            colors: [Color(red: 0.45, green: 0.82, blue: 1.00),
-                                     Color(red: 0.05, green: 0.38, blue: 0.95),
-                                     Color(red: 0.02, green: 0.12, blue: 0.42)],
-                            center: UnitPoint(x: 0.38, y: 0.32),
-                            startRadius: 0,
-                            endRadius: hudControlSize * 0.46
-                        ))
-                        .padding(isPad ? 9 : 7)
-                        .overlay {
-                            Circle()
-                                .stroke(.white.opacity(0.55), lineWidth: isPad ? 1.4 : 1)
-                                .padding(isPad ? 11 : 8)
-                        }
-                        .shadow(color: hudCyan.opacity(0.85), radius: isPad ? 10 : 7)
-                    Image(systemName: "pause.fill")
-                        .font(.system(size: pauseGlyphSize, weight: .black))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.35), radius: 0, y: 1)
-                        .accessibilityLabel(Text("Pause"))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Image(systemName: "pause.fill")
+                    .font(.system(size: pauseGlyphSize, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityLabel(Text("Pause"))
             }
             .frame(width: hudControlSize)
             .contentShape(RoundedRectangle(cornerRadius: isPad ? 18 : 13,
@@ -414,7 +395,9 @@ struct GameView: View {
         let lamp = timerLamp
         return cockpitPanel {
             HStack(spacing: isPad ? 8 : 5) {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0,
+                // This is a decorative sweep around a once-per-second value;
+                // it does not need a separate 30 fps display link.
+                TimelineView(.animation(minimumInterval: 1.0 / 12.0,
                                         paused: !isReefRunning || reduceMotion)) { timeline in
                     let spin = timeline.date.timeIntervalSinceReferenceDate * 70
                     ZStack {
@@ -748,7 +731,7 @@ private struct CockpitPanelEnergyRail: View {
 
     var body: some View {
         GeometryReader { proxy in
-            TimelineView(.animation(minimumInterval: 1.0 / 20.0,
+            TimelineView(.animation(minimumInterval: 1.0 / 10.0,
                                     paused: !isRunning)) { timeline in
                 let duration = 5.8
                 let elapsed = timeline.date.timeIntervalSinceReferenceDate

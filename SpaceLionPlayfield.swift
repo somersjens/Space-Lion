@@ -223,12 +223,12 @@ struct SpaceLionPlayfield: View {
     }
 
     private func lion(metrics: Metrics) -> some View {
-        // Pose, drift and the reach frames follow the clock. The flight itself
-        // must stay outside that clock: reading `motionOffset` inside the
-        // timeline makes SwiftUI drop the in-flight interpolation, so the lion
-        // vanishes between roughly a third and two thirds of the trip and then
-        // appears further along the path.
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0,
+        // The flight itself is interpolated by SwiftUI outside this timeline;
+        // reading `motionOffset` here drops that interpolation. This clock only
+        // swaps poses and supplies the subtle idle drift, so display-link speed
+        // needlessly rebuilt the lion (with two shadows and a blur) sixty times
+        // per second.
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0,
                                 paused: !isRunning || reduceMotion)) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
             let driftX = reduceMotion
@@ -319,9 +319,9 @@ struct SpaceLionPlayfield: View {
         case .travellingHome:
             // A wrong answer deliberately holds the pointing pose a little
             // longer; a correct answer has already retracted before its flip.
-            return selectedWasCorrect || elapsed >= 0.28 ? "1.2" : "1.5"
+            return selectedWasCorrect || elapsed >= returnDuration * 0.48 ? "1.2" : "1.5"
         case .settling:
-            return elapsed < 0.34 ? "1.2" : "1.1"
+            return elapsed < settleDuration * 0.45 ? "1.2" : "1.1"
         }
     }
 
@@ -405,15 +405,17 @@ struct SpaceLionPlayfield: View {
         }
     }
 
-    private var orientDuration: Double { reduceMotion ? 0.10 : 0.38 }
-    private var outwardDuration: Double { reduceMotion ? 0.14 : 0.68 }
-    private var pressDuration: Double { reduceMotion ? 0.04 : 0.10 }
-    private var retractFingerDuration: Double { reduceMotion ? 0.06 : 0.20 }
-    private var pushOffDuration: Double { reduceMotion ? 0.08 : 0.20 }
-    /// Long enough for a weightless arrival: most of the distance is covered
-    /// early, and the last stretch only drifts to a stop.
-    private var returnDuration: Double { reduceMotion ? 0.24 : 1.28 }
-    private var settleDuration: Double { reduceMotion ? 0.08 : 0.56 }
+    // Keep the astronaut's story readable, but do not make the player wait on
+    // it. The old values took about 1.1 seconds before a tap was registered and
+    // over three seconds before another answer could be chosen. These timings
+    // put contact under half a second and return control in roughly one second.
+    private var orientDuration: Double { reduceMotion ? 0.06 : 0.14 }
+    private var outwardDuration: Double { reduceMotion ? 0.10 : 0.30 }
+    private var pressDuration: Double { reduceMotion ? 0.03 : 0.06 }
+    private var retractFingerDuration: Double { reduceMotion ? 0.04 : 0.09 }
+    private var pushOffDuration: Double { reduceMotion ? 0.05 : 0.08 }
+    private var returnDuration: Double { reduceMotion ? 0.14 : 0.36 }
+    private var settleDuration: Double { reduceMotion ? 0.05 : 0.14 }
 
     private func beginOutwardTravel(_ option: AnswerOption,
                                      target: CGPoint,
@@ -748,7 +750,6 @@ extension SpaceLionPlayfield {
                 isPad ? 181 : 132,
                 size.width * 0.194)
         }
-        private var columnPadding: CGFloat { answerSize * 0.13 }
         /// Physical cabinet visible outside the answer modules. Keeping this
         /// proportional (and capped by the module size) leaves enough room for
         /// a readable side face on phones without swallowing the play window
@@ -783,10 +784,15 @@ extension SpaceLionPlayfield {
         }
 
         fileprivate var cockpit: CockpitLayout {
-            let leftEdge = leftX + answerSize / 2 + columnPadding
-            let rightEdge = rightX - answerSize / 2 - columnPadding
-            let gap: CGFloat = isPad ? 36 : 22
             let frameWidth: CGFloat = isPad ? 26 : 18
+            // The rack ends at the mounting flange, rather than carrying an
+            // extra strip of empty cabinet between the controls and glass.
+            let leftEdge = leftX + answerSize * 0.56
+            let rightEdge = rightX - answerSize * 0.56
+            // Let the glass itself come closer to the controls. The frame's
+            // outer shadow then tucks slightly underneath the mounting flange,
+            // avoiding even a hairline of empty cabinet at either side.
+            let frameOuterReach = frameWidth * 1.15
             // Keep the ceiling joint where it already clears the HUD, but let
             // the actual glass begin lower. The space between both becomes a
             // deliberate instrument header instead of an accidental dark rim.
@@ -804,9 +810,9 @@ extension SpaceLionPlayfield {
             let bottom = max(top + 60,
                              floorTop - frameWidth * 0.5 - sillDepth)
             return CockpitLayout(
-                windowRect: CGRect(x: leftEdge + gap,
+                windowRect: CGRect(x: leftEdge + frameOuterReach,
                                    y: top,
-                                   width: max(60, rightEdge - leftEdge - gap * 2),
+                                   width: max(60, rightEdge - leftEdge - frameOuterReach * 2),
                                    height: bottom - top),
                 ceilingJointY: ceilingJointY,
                 floorTop: floorTop,
@@ -1196,7 +1202,10 @@ private struct SpaceViewportGlass: View {
     let isRunning: Bool
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isRunning)) { timeline in
+        // A reflection crossing the glass is deliberately slow. Twelve samples
+        // per second look continuous while avoiding a full-window gradient and
+        // clip pass on every display frame.
+        TimelineView(.animation(minimumInterval: 1.0 / 12.0, paused: !isRunning)) { timeline in
             let travel = isRunning
                 ? cockpitWrap(timeline.date.timeIntervalSinceReferenceDate * 0.06)
                 : 0.22
@@ -1381,7 +1390,7 @@ private struct SpaceshipCockpit: View {
 
     /// Normalised star data is invariant for the life of the app. Precomputing
     /// it avoids four integer hash sequences per star on every animation frame.
-    private static let starSamples: [StarSample] = (0..<320).map { index in
+    private static let starSamples: [StarSample] = (0..<180).map { index in
         let depth = seededValue(index, 1)
         return StarSample(depth: depth,
                           x: seededValue(index, 2),
@@ -1401,7 +1410,9 @@ private struct SpaceshipCockpit: View {
 
             // One shared clock drives every live cockpit light. Previously
             // every answer button owned a TimelineView and Canvas of its own.
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isRunning)) { timeline in
+            // The cockpit scenery drifts slowly; 15 fps is ample for it. The
+            // interactive lion still uses compositor animations independently.
+            TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: !isRunning)) { timeline in
                 let time = timeline.date.timeIntervalSinceReferenceDate
                 Canvas(rendersAsynchronously: true) { context, size in
                     drawAnimated(in: context, size: size, time: time)
@@ -1478,10 +1489,10 @@ private struct SpaceshipCockpit: View {
         // it continue over both side walls at exactly the same horizon as the
         // screen sill and the bottom of the answer racks.
         drawFloor(in: context, size: size, top: floorTop, time: 0)
-        // One uninterrupted zipper of navigation lights ties the full-width
-        // ceiling and floor joints together after every structural layer has
-        // been painted, so neither the frame nor the deck can clip it.
-        drawBoundaryLightChains(in: context, size: size)
+        // The recessed carriers are structural and remain still. Their lamps
+        // are painted by the shared animation canvas so the ceiling and floor
+        // can carry the same measured energy flow as the side rails.
+        drawBoundaryLightChains(in: context, size: size, phase: nil)
     }
 
     private func drawAnimated(in context: GraphicsContext, size: CGSize, time: TimeInterval) {
@@ -1512,6 +1523,11 @@ private struct SpaceshipCockpit: View {
         drawHullEnergyFlow(in: context, window: window, time: time)
         drawPlatformPulse(in: context, size: size, time: time)
         drawCabinetPulse(in: context, window: window, time: time)
+        drawBoundaryLightChains(
+            in: context,
+            size: size,
+            phase: CGFloat(cockpitWrap(time * 0.028))
+        )
     }
 
     /// The fixed part of the two armoured cables from a control to the glass.
@@ -1812,12 +1828,28 @@ private struct SpaceshipCockpit: View {
                  from: CGPoint(x: size.width * fraction, y: bottom * 0.68),
                  to: CGPoint(x: size.width * fraction, y: bottom))
         }
-        drawVent(ceiling,
-                 rect: CGRect(x: size.width * 0.06, y: bottom * 0.18,
-                              width: size.width * 0.08, height: bottom * 0.42))
-        drawVent(ceiling,
-                 rect: CGRect(x: size.width * 0.86, y: bottom * 0.18,
-                              width: size.width * 0.08, height: bottom * 0.42))
+        // The old slatted vents looked like two unrelated grilles floating in
+        // the roof. A mirrored pair of navigation sensor pods now anchors the
+        // ceiling to the rest of the cockpit's instrument language: armoured
+        // housings, cyan optics and a few warm status lights.
+        let sensorPodSize = CGSize(width: size.width * 0.095,
+                                   height: bottom * 0.46)
+        drawCeilingSensorPod(
+            ceiling,
+            rect: CGRect(x: size.width * 0.055,
+                         y: bottom * 0.15,
+                         width: sensorPodSize.width,
+                         height: sensorPodSize.height),
+            sensorFacesRight: true
+        )
+        drawCeilingSensorPod(
+            ceiling,
+            rect: CGRect(x: size.width * 0.85,
+                         y: bottom * 0.15,
+                         width: sensorPodSize.width,
+                         height: sensorPodSize.height),
+            sensorFacesRight: false
+        )
 
         var ceilingJoint = Path()
         ceilingJoint.move(to: CGPoint(x: 0, y: leftOuterBottom))
@@ -1879,6 +1911,125 @@ private struct SpaceshipCockpit: View {
             let bar = CGRect(x: rect.minX + 3, y: y, width: rect.width - 6, height: max(1.5, gap * 0.45))
             context.fill(Path(roundedRect: bar, cornerRadius: 1),
                          with: .color(metalLight.opacity(0.35)))
+        }
+    }
+
+    /// A compact overhead navigation sensor. The two pods mirror one another,
+    /// with their luminous optics aimed toward the windscreen and their status
+    /// lamps facing the outer hull.
+    private func drawCeilingSensorPod(_ context: GraphicsContext,
+                                      rect: CGRect,
+                                      sensorFacesRight: Bool) {
+        guard rect.width > 18, rect.height > 12 else { return }
+
+        let cut = min(rect.height * 0.28, rect.width * 0.10)
+        let outer = chamfered(rect, cut: cut)
+        context.fill(outer, with: .color(.black.opacity(0.72)))
+        context.stroke(outer, with: .color(metalLight.opacity(0.52)),
+                       lineWidth: isPad ? 2.2 : 1.5)
+
+        let inset = max(2, rect.height * 0.07)
+        let innerRect = rect.insetBy(dx: inset, dy: inset)
+        let inner = chamfered(innerRect, cut: max(2, cut - inset * 0.55))
+        context.fill(
+            inner,
+            with: .linearGradient(
+                Gradient(colors: [metal.opacity(0.96), metalDark, .black.opacity(0.96)]),
+                startPoint: CGPoint(x: innerRect.minX, y: innerRect.minY),
+                endPoint: CGPoint(x: innerRect.maxX, y: innerRect.maxY)
+            )
+        )
+        context.stroke(inner, with: .color(cyan.opacity(0.52)),
+                       lineWidth: isPad ? 1.8 : 1.15)
+
+        // A short orange key light echoes the answer sockets and makes the
+        // module read as powered equipment rather than a decorative cut-out.
+        let keyX = sensorFacesRight
+            ? innerRect.minX + innerRect.width * 0.09
+            : innerRect.maxX - innerRect.width * 0.09
+        lightBar(context,
+                 center: CGPoint(x: keyX, y: innerRect.midY),
+                 length: innerRect.height * 0.56,
+                 thickness: max(1.5, innerRect.width * 0.022),
+                 color: orange,
+                 vertical: true)
+
+        let lensRadius = min(innerRect.height * 0.31, innerRect.width * 0.14)
+        let lensX = sensorFacesRight
+            ? innerRect.maxX - lensRadius * 1.45
+            : innerRect.minX + lensRadius * 1.45
+        let lensCentre = CGPoint(x: lensX, y: innerRect.midY)
+        let lensOuter = CGRect(x: lensCentre.x - lensRadius * 1.26,
+                               y: lensCentre.y - lensRadius * 1.26,
+                               width: lensRadius * 2.52,
+                               height: lensRadius * 2.52)
+        let lens = CGRect(x: lensCentre.x - lensRadius,
+                          y: lensCentre.y - lensRadius,
+                          width: lensRadius * 2,
+                          height: lensRadius * 2)
+
+        var glow = context
+        glow.blendMode = .plusLighter
+        glow.fill(Path(ellipseIn: lensOuter.insetBy(dx: -lensRadius * 0.32,
+                                                     dy: -lensRadius * 0.32)),
+                  with: .radialGradient(
+                    Gradient(colors: [cyan.opacity(0.24), cyan.opacity(0.08), .clear]),
+                    center: lensCentre,
+                    startRadius: lensRadius * 0.25,
+                    endRadius: lensRadius * 1.58
+                  ))
+        context.fill(Path(ellipseIn: lensOuter), with: .color(.black.opacity(0.88)))
+        context.stroke(Path(ellipseIn: lensOuter), with: .color(cyan.opacity(0.82)),
+                       lineWidth: isPad ? 2.0 : 1.25)
+        context.fill(
+            Path(ellipseIn: lens),
+            with: .radialGradient(
+                Gradient(colors: [.white.opacity(0.96), cyan, blue, metalDark]),
+                center: CGPoint(x: lensCentre.x - lensRadius * 0.28,
+                                y: lensCentre.y - lensRadius * 0.28),
+                startRadius: 0,
+                endRadius: lensRadius * 1.12
+            )
+        )
+
+        // A small targeting reticle gives the glowing lens a clear purpose at
+        // both phone and iPad scale without adding tiny, unreadable labels.
+        var reticle = Path()
+        reticle.move(to: CGPoint(x: lensCentre.x - lensRadius * 0.52, y: lensCentre.y))
+        reticle.addLine(to: CGPoint(x: lensCentre.x + lensRadius * 0.52, y: lensCentre.y))
+        reticle.move(to: CGPoint(x: lensCentre.x, y: lensCentre.y - lensRadius * 0.52))
+        reticle.addLine(to: CGPoint(x: lensCentre.x, y: lensCentre.y + lensRadius * 0.52))
+        context.stroke(reticle, with: .color(.white.opacity(0.64)),
+                       lineWidth: isPad ? 1.35 : 0.9)
+        context.fill(Path(ellipseIn: CGRect(x: lensCentre.x - lensRadius * 0.13,
+                                            y: lensCentre.y - lensRadius * 0.13,
+                                            width: lensRadius * 0.26,
+                                            height: lensRadius * 0.26)),
+                     with: .color(.white.opacity(0.94)))
+
+        // Three stepped telemetry bars occupy the opposite half of each pod.
+        // Mirroring the order makes both modules point visually inward.
+        let telemetryNearLens = sensorFacesRight
+            ? lensCentre.x - lensRadius * 1.55
+            : lensCentre.x + lensRadius * 1.55
+        let telemetryOuter = sensorFacesRight
+            ? innerRect.minX + innerRect.width * 0.22
+            : innerRect.maxX - innerRect.width * 0.22
+        let barStartX = min(telemetryNearLens, telemetryOuter)
+        let barEndX = max(telemetryNearLens, telemetryOuter)
+        let availableBarWidth = max(4, barEndX - barStartX)
+        for index in 0..<3 {
+            let fraction = CGFloat(index) / 2
+            let y = innerRect.minY + innerRect.height * (0.29 + fraction * 0.21)
+            let taper = 1 - CGFloat(index) * 0.16
+            let width = availableBarWidth * taper
+            let centerX = sensorFacesRight ? barEndX - width * 0.5 : barStartX + width * 0.5
+            let bar = CGRect(x: centerX - width * 0.5,
+                             y: y,
+                             width: width,
+                             height: max(1.2, innerRect.height * 0.045))
+            context.fill(Path(roundedRect: bar, cornerRadius: bar.height * 0.5),
+                         with: .color((index == 1 ? orange : cyan).opacity(index == 1 ? 0.78 : 0.52)))
         }
     }
 
@@ -2204,10 +2355,12 @@ private struct SpaceshipCockpit: View {
     }
 
     /// Repeats the sill's navigation-light rhythm across the complete room
-    /// joints, including both perspective shoulders. The upper and lower rows
-    /// share the same cadence so the cockpit reads as one manufactured shell.
+    /// joints, including both perspective shoulders. A nil phase draws only
+    /// the recessed structural carriers; a live phase moves their lamps in
+    /// opposite directions across the ceiling and floor.
     private func drawBoundaryLightChains(in context: GraphicsContext,
-                                         size: CGSize) {
+                                         size: CGSize,
+                                         phase: CGFloat?) {
         let leftControlX = layout.buttonPoints.first?.x ?? layout.leftEdge
         let rightControlX = layout.buttonPoints
             .dropFirst(GameConfig.answerColumnCount).first?.x ?? layout.rightEdge
@@ -2229,7 +2382,8 @@ private struct SpaceshipCockpit: View {
                                 CGPoint(x: leftJoin, y: upperBackY + upperInset),
                                 CGPoint(x: rightJoin, y: upperBackY + upperInset),
                                 CGPoint(x: size.width, y: upperRightY + upperInset)],
-                       startsWithWarmLight: true)
+                       startsWithWarmLight: true,
+                       phase: phase)
 
         let lowerBackY = layout.floorTop
         let lowerLeftY = sideWallCanvasY(backY: lowerBackY,
@@ -2246,21 +2400,41 @@ private struct SpaceshipCockpit: View {
                                 CGPoint(x: leftJoin, y: lowerBackY - lowerInset),
                                 CGPoint(x: rightJoin, y: lowerBackY - lowerInset),
                                 CGPoint(x: size.width, y: lowerRightY - lowerInset)],
-                       startsWithWarmLight: false)
+                       startsWithWarmLight: false,
+                       phase: phase.map { -$0 })
     }
 
     private func drawLightChain(in context: GraphicsContext,
                                 points: [CGPoint],
-                                startsWithWarmLight: Bool) {
+                                startsWithWarmLight: Bool,
+                                phase: CGFloat?) {
         guard points.count > 1 else { return }
         let preferredDash: CGFloat = isPad ? 48 : 31
         let preferredGap: CGFloat = isPad ? 30 : 19
         let thickness: CGFloat = isPad ? 3.4 : 2.2
         var lightIndex = startsWithWarmLight ? 2 : 0
 
-        // The lamps sit in one continuous recessed carrier. Even where a lamp
-        // is deliberately absent, this metal-and-energy strip keeps the edge
-        // connected instead of dissolving into unrelated floating dashes.
+        if let phase {
+            // Only three compact highlights are animated. The many individual
+            // LED segments remain in the static canvas below, keeping this much
+            // cheaper than repainting every lamp fifteen times per second.
+            for pulseIndex in 0..<3 {
+                let progress = wrap(phase + CGFloat(pulseIndex) / 3)
+                let color = (pulseIndex + (startsWithWarmLight ? 1 : 0)).isMultiple(of: 3)
+                    ? orange
+                    : cyan
+                drawBoundaryPulse(in: context,
+                                  points: points,
+                                  progress: progress,
+                                  length: preferredDash * 1.22,
+                                  thickness: thickness,
+                                  color: color)
+            }
+            return
+        }
+
+        // The lamps sit in one continuous recessed carrier. Even where a pulse
+        // passes, this strip keeps the edge mechanically connected.
         var carrier = Path()
         carrier.move(to: points[0])
         for point in points.dropFirst() { carrier.addLine(to: point) }
@@ -2279,7 +2453,7 @@ private struct SpaceshipCockpit: View {
                                           lineJoin: .round))
         var carrierGlow = context
         carrierGlow.blendMode = .plusLighter
-        carrierGlow.stroke(carrier, with: .color(cyan.opacity(0.20)),
+        carrierGlow.stroke(carrier, with: .color(cyan.opacity(0.14)),
                            style: StrokeStyle(lineWidth: thickness * 0.70,
                                               lineCap: .round,
                                               lineJoin: .round))
@@ -2318,18 +2492,104 @@ private struct SpaceshipCockpit: View {
                                                   lineCap: .round))
                 var glow = context
                 glow.blendMode = .plusLighter
-                glow.stroke(mark, with: .color(color.opacity(0.34)),
-                            style: StrokeStyle(lineWidth: thickness * 4.2,
+                glow.stroke(mark, with: .color(color.opacity(0.12)),
+                            style: StrokeStyle(lineWidth: thickness * 3.2,
                                                lineCap: .round))
-                context.stroke(mark, with: .color(color.opacity(0.96)),
+                context.stroke(mark, with: .color(color.opacity(0.48)),
                                style: StrokeStyle(lineWidth: thickness,
                                                   lineCap: .round))
-                context.stroke(mark, with: .color(.white.opacity(0.50)),
+                context.stroke(mark, with: .color(.white.opacity(0.20)),
                                style: StrokeStyle(lineWidth: max(0.7, thickness * 0.28),
                                                   lineCap: .round))
                 lightIndex += 1
             }
         }
+    }
+
+    /// A short illuminated span travelling along the complete polyline. The
+    /// span is constructed from the actual rail geometry, so when it reaches a
+    /// shoulder it bends through the corner instead of jumping or sticking out.
+    private func drawBoundaryPulse(in context: GraphicsContext,
+                                   points: [CGPoint],
+                                   progress: CGFloat,
+                                   length: CGFloat,
+                                   thickness: CGFloat,
+                                   color: Color) {
+        let segmentLengths = zip(points, points.dropFirst()).map { pair in
+            hypot(pair.1.x - pair.0.x, pair.1.y - pair.0.y)
+        }
+        let totalLength = segmentLengths.reduce(0, +)
+        guard totalLength > 1 else { return }
+
+        var start = progress * totalLength - length * 0.5
+        start = start.truncatingRemainder(dividingBy: totalLength)
+        if start < 0 { start += totalLength }
+
+        var pulse = polylineSpan(points: points,
+                                 segmentLengths: segmentLengths,
+                                 from: start,
+                                 length: min(length, totalLength))
+        let overflow = start + length - totalLength
+        if overflow > 0 {
+            pulse.addPath(polylineSpan(points: points,
+                                       segmentLengths: segmentLengths,
+                                       from: 0,
+                                       length: overflow))
+        }
+
+        let style = StrokeStyle(lineWidth: thickness * 1.45,
+                                lineCap: .round,
+                                lineJoin: .round)
+        var glow = context
+        glow.blendMode = .plusLighter
+        glow.stroke(pulse, with: .color(color.opacity(0.52)),
+                    style: StrokeStyle(lineWidth: thickness * 4.4,
+                                       lineCap: .round,
+                                       lineJoin: .round))
+        context.stroke(pulse, with: .color(color.opacity(0.98)), style: style)
+        context.stroke(pulse, with: .color(.white.opacity(0.72)),
+                       style: StrokeStyle(lineWidth: max(0.8, thickness * 0.34),
+                                          lineCap: .round,
+                                          lineJoin: .round))
+    }
+
+    private func polylineSpan(points: [CGPoint],
+                              segmentLengths: [CGFloat],
+                              from start: CGFloat,
+                              length: CGFloat) -> Path {
+        var path = Path()
+        let end = start + length
+        var travelled: CGFloat = 0
+        var hasStarted = false
+
+        for segment in 0..<segmentLengths.count {
+            let segmentLength = segmentLengths[segment]
+            guard segmentLength > 0 else { continue }
+            let segmentEnd = travelled + segmentLength
+            let visibleStart = max(start, travelled)
+            let visibleEnd = min(end, segmentEnd)
+
+            if visibleEnd > visibleStart {
+                let a = points[segment]
+                let b = points[segment + 1]
+                let startT = (visibleStart - travelled) / segmentLength
+                let endT = (visibleEnd - travelled) / segmentLength
+                let startPoint = CGPoint(x: a.x + (b.x - a.x) * startT,
+                                         y: a.y + (b.y - a.y) * startT)
+                let endPoint = CGPoint(x: a.x + (b.x - a.x) * endT,
+                                       y: a.y + (b.y - a.y) * endT)
+                if hasStarted {
+                    path.addLine(to: startPoint)
+                } else {
+                    path.move(to: startPoint)
+                    hasStarted = true
+                }
+                path.addLine(to: endPoint)
+            }
+            travelled = segmentEnd
+            if travelled >= end { break }
+        }
+        return path
     }
 
     private func drawSill(in context: GraphicsContext, window: CGRect, floorTop: CGFloat) {
@@ -2989,7 +3249,8 @@ private struct SpaceshipCockpit: View {
     private func drawStars(in context: GraphicsContext, window: CGRect, time: TimeInterval) {
         var glow = context
         glow.blendMode = .plusLighter
-        let count = min(320, Int(window.width * window.height / 900))
+        let count = min(Self.starSamples.count,
+                        Int(window.width * window.height / 1_400))
         for index in 0..<count {
             let sample = Self.starSamples[index]
             let depth = sample.depth
@@ -3025,7 +3286,9 @@ private struct SpaceshipCockpit: View {
     private func drawAsteroids(in context: GraphicsContext,
                                window: CGRect,
                                time: TimeInterval) {
-        let groupSizes = [5, 4, 4]
+        // Eight varied rocks retain the three drifting families without
+        // rebuilding thirteen multi-path, blurred objects every scenery tick.
+        let groupSizes = [3, 3, 2]
         let groupLanes: [CGFloat] = [0.22, 0.72, 0.45]
         var index = 0
 
