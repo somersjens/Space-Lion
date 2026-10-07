@@ -761,17 +761,18 @@ extension SpaceLionPlayfield {
             let leftEdge = leftX + answerSize / 2 + columnPadding
             let rightEdge = rightX - answerSize / 2 - columnPadding
             let gap: CGFloat = isPad ? 36 : 22
-            // Leave the 3D lower lip and shadow of the HUD fully in front of
-            // the room. Aligning their nominal frames put this joint behind
-            // those effects even though the geometry itself did not overlap.
-            let top = topReserve
+            let frameWidth: CGFloat = isPad ? 26 : 18
+            // Keep the ceiling joint where it already clears the HUD, but let
+            // the actual glass begin lower. The space between both becomes a
+            // deliberate instrument header instead of an accidental dark rim.
+            let ceilingJointY = topReserve - frameWidth * 0.5
+            let top = topReserve + (isPad ? 16 : 10)
             let rows = answerPoints.prefix(GameConfig.answerColumnCount)
             let lastAnswerY = rows.last?.y ?? columnBottom
             // One shared horizon for the whole room. The answer rack, the
             // screen sill and the side walls all meet the floor here.
             let floorTop = min(size.height - max(bottomReserve, isPad ? 16 : 8),
                                lastAnswerY + answerSize * 0.64)
-            let frameWidth: CGFloat = isPad ? 26 : 18
             let sillDepth: CGFloat = isPad ? 14 : 9
             // Let the outside view continue down until only the physical lower
             // frame and its shallow sill remain above the shared floor line.
@@ -782,7 +783,9 @@ extension SpaceLionPlayfield {
                                    y: top,
                                    width: max(60, rightEdge - leftEdge - gap * 2),
                                    height: bottom - top),
+                ceilingJointY: ceilingJointY,
                 floorTop: floorTop,
+                canvasHeight: size.height,
                 leftEdge: leftEdge,
                 rightEdge: rightEdge,
                 buttonPoints: answerPoints,
@@ -822,7 +825,9 @@ private func cockpitWrap(_ value: Double) -> Double {
 /// exactly with the interactive buttons laid over them.
 private struct CockpitLayout {
     let windowRect: CGRect
+    let ceilingJointY: CGFloat
     let floorTop: CGFloat
+    let canvasHeight: CGFloat
     let leftEdge: CGFloat
     let rightEdge: CGFloat
     let buttonPoints: [CGPoint]
@@ -1301,7 +1306,21 @@ private struct SpaceshipCockpit: View {
     /// How strongly the near edge of each side wall opens toward the viewer.
     /// The wall panels and the wall/floor joint must use this exact same
     /// projection or the cockpit stops reading as one coherent 3D box.
-    private var sideWallFrontSpread: CGFloat { isPad ? 1.34 : 1.40 }
+    private var sideWallFrontSpread: CGFloat {
+        let preferred: CGFloat = isPad ? 1.34 : 1.40
+        let vanishingY = layout.windowRect.midY
+        let floorRun = layout.floorTop - vanishingY
+        guard floorRun > 1 else { return preferred }
+
+        // A lowered floor used to push the projected outer joint beyond the
+        // canvas, where it was clamped and stopped matching the wall above.
+        // Fit the complete projection into the available height instead. The
+        // same fitted value is used by roof, walls and floor, preserving one
+        // coherent vanishing system at every aspect ratio.
+        let nearLimit = layout.canvasHeight - (isPad ? 8 : 5)
+        let fitted = (nearLimit - vanishingY) / floorRun
+        return min(preferred, max(1.08, fitted))
+    }
 
     /// Projects a horizontal line on the rear wall to the visible edge of a
     /// side wall. Both the ceiling and floor use this, so their joints meet
@@ -1337,6 +1356,7 @@ private struct SpaceshipCockpit: View {
         // of both side walls along the same perspective projection that the
         // floor uses below, rather than letting the wall panels reach the top.
         drawRoof(in: context, size: size, window: window)
+        drawUpperWindowHeader(in: context, window: window, cut: cut)
         drawSpace(in: context, window: window, cut: cut, time: 0)
         drawWindowFrame(in: context, window: window, cut: cut)
         drawSill(in: context, window: window, floorTop: floorTop)
@@ -1619,7 +1639,7 @@ private struct SpaceshipCockpit: View {
     // MARK: Hull
 
     private func drawRoof(in context: GraphicsContext, size: CGSize, window: CGRect) {
-        let bottom = window.minY - frameWidth * 0.5
+        let bottom = layout.ceilingJointY
         guard bottom > 0 else { return }
         let leftControlX = layout.buttonPoints.first?.x ?? layout.leftEdge
         let rightControlX = layout.buttonPoints
@@ -1685,6 +1705,51 @@ private struct SpaceshipCockpit: View {
                        lineWidth: isPad ? 1.5 : 1)
     }
 
+    /// A shallow equipment header between the ceiling joint and the recessed
+    /// glass. It gives the lowered viewport a structural reason to sit there
+    /// and replaces the previous featureless black strip with cockpit detail.
+    private func drawUpperWindowHeader(in context: GraphicsContext,
+                                       window: CGRect,
+                                       cut: CGFloat) {
+        let top = layout.ceilingJointY
+        let bottom = window.minY - frameWidth * 0.5
+        guard bottom > top + 1 else { return }
+
+        let shoulder = min(cut * 0.42, window.width * 0.045)
+        var header = Path()
+        header.move(to: CGPoint(x: layout.leftEdge, y: top))
+        header.addLine(to: CGPoint(x: layout.rightEdge, y: top))
+        header.addLine(to: CGPoint(x: window.maxX - shoulder, y: bottom))
+        header.addLine(to: CGPoint(x: window.minX + shoulder, y: bottom))
+        header.closeSubpath()
+
+        context.fill(header,
+                     with: .linearGradient(
+                        Gradient(colors: [metalLight.opacity(0.78),
+                                          metal,
+                                          metalDark]),
+                        startPoint: CGPoint(x: 0, y: top),
+                        endPoint: CGPoint(x: 0, y: bottom)))
+        context.stroke(header, with: .color(.black.opacity(0.86)),
+                       lineWidth: isPad ? 3.2 : 2.2)
+
+        var highlight = Path()
+        highlight.move(to: CGPoint(x: layout.leftEdge, y: top + 0.75))
+        highlight.addLine(to: CGPoint(x: layout.rightEdge, y: top + 0.75))
+        context.stroke(highlight, with: .color(.white.opacity(0.30)),
+                       lineWidth: isPad ? 1.8 : 1.2)
+
+        let headerHeight = bottom - top
+        for (index, fraction) in ([0.24, 0.50, 0.76] as [CGFloat]).enumerated() {
+            lightBar(context,
+                     center: CGPoint(x: window.minX + window.width * fraction,
+                                     y: top + headerHeight * 0.53),
+                     length: window.width * (index == 1 ? 0.105 : 0.075),
+                     thickness: isPad ? 3.2 : 2.2,
+                     color: index == 1 ? orange : cyan)
+        }
+    }
+
     private func drawVent(_ context: GraphicsContext, rect: CGRect) {
         guard rect.width > 8, rect.height > 8 else { return }
         context.fill(Path(roundedRect: rect, cornerRadius: 3),
@@ -1724,7 +1789,7 @@ private struct SpaceshipCockpit: View {
         let innerModuleX = controlX + towardInner * buttonSize * 0.58
         let vanishingY = window.midY
         let frontSpread = sideWallFrontSpread
-        let wallTop = window.minY - frameWidth * 0.5
+        let wallTop = layout.ceilingJointY
         let wallBottom = layout.floorTop
         let wallHeight = max(1, wallBottom - wallTop)
 
@@ -1798,17 +1863,26 @@ private struct SpaceshipCockpit: View {
                            lineWidth: isPad ? 1.8 : 1.1)
         }
 
-        // Low, raised armour plates sit on that side wall. The front face,
-        // lower edge and cast shadow all obey the same perspective projection.
-        // Keeping them shallow avoids recreating the old stack of grey boxes.
-        let plateBands: [(CGFloat, CGFloat)] = [(-0.015, 0.155),
-                                                (0.295, 0.445),
-                                                (0.565, 0.715),
-                                                (0.855, 1.015)]
+        // Recessed instrument panels occupy the space that is actually
+        // available between ceiling and floor. Their count, height and gaps
+        // are derived here, so no last panel is ever sliced off by the deck.
+        let panelInset = max(buttonSize * 0.10, isPad ? 13 : 8)
+        let panelTop = wallTop + panelInset
+        let panelBottom = wallBottom - panelInset
+        let availablePanelHeight = max(1, panelBottom - panelTop)
+        let panelGap = max(buttonSize * 0.09, isPad ? 12 : 7)
+        let preferredPanelHeight = buttonSize * 0.50
+        let fittingCount = Int((availablePanelHeight + panelGap)
+                               / (preferredPanelHeight + panelGap))
+        let panelCount = max(1, min(4, fittingCount))
+        let panelHeight = max(1,
+                              (availablePanelHeight
+                               - panelGap * CGFloat(panelCount - 1))
+                              / CGFloat(panelCount))
         let lift = min(buttonSize * 0.075, isPad ? 12 : 8)
-        for (index, band) in plateBands.enumerated() {
-            let backTop = wallTop + wallHeight * band.0
-            let backBottom = wallTop + wallHeight * band.1
+        for index in 0..<panelCount {
+            let backTop = panelTop + CGFloat(index) * (panelHeight + panelGap)
+            let backBottom = backTop + panelHeight
             let nearDepth: CGFloat = 0.08
             let farDepth: CGFloat = 0.70
 
@@ -1854,16 +1928,35 @@ private struct SpaceshipCockpit: View {
             context.stroke(topHighlight, with: .color(.white.opacity(0.32)),
                            lineWidth: isPad ? 2.2 : 1.4)
 
-            let detailStart = wallPoint(backY: (backTop + backBottom) * 0.5, depth: 0.22)
-            let detailEnd = wallPoint(backY: (backTop + backBottom) * 0.5, depth: 0.53)
-            var detail = Path()
-            detail.move(to: detailStart)
-            detail.addLine(to: detailEnd)
-            context.stroke(detail, with: .color(.black.opacity(0.80)),
-                           lineWidth: isPad ? 8 : 5)
-            context.stroke(detail,
-                           with: .color((index.isMultiple(of: 2) ? cyan : orange).opacity(0.72)),
-                           lineWidth: isPad ? 2.8 : 1.8)
+            // A dark inset display and several unequal signal bars make each
+            // panel read as equipment rather than an unexplained metal box.
+            let displayTop = backTop + panelHeight * 0.20
+            let displayBottom = backBottom - panelHeight * 0.20
+            var display = Path()
+            display.move(to: wallPoint(backY: displayTop, depth: 0.19))
+            display.addLine(to: wallPoint(backY: displayTop, depth: 0.59))
+            display.addLine(to: wallPoint(backY: displayBottom, depth: 0.61))
+            display.addLine(to: wallPoint(backY: displayBottom, depth: 0.20))
+            display.closeSubpath()
+            context.fill(display, with: .color(Color(red: 0.008, green: 0.018, blue: 0.055)))
+            context.stroke(display, with: .color(cyan.opacity(0.22)), lineWidth: 1)
+
+            let signalColor = index.isMultiple(of: 2) ? cyan : orange
+            for row in 0..<3 {
+                let rowY = displayTop
+                    + (displayBottom - displayTop) * (0.27 + CGFloat(row) * 0.23)
+                let start = wallPoint(backY: rowY, depth: 0.25)
+                let endDepth: CGFloat = row == 1 ? 0.53 : (row == 0 ? 0.47 : 0.42)
+                let end = wallPoint(backY: rowY, depth: endDepth)
+                var signal = Path()
+                signal.move(to: start)
+                signal.addLine(to: end)
+                context.stroke(signal, with: .color(.black.opacity(0.88)),
+                               lineWidth: isPad ? 5.5 : 3.5)
+                context.stroke(signal,
+                               with: .color(signalColor.opacity(row == 1 ? 0.90 : 0.58)),
+                               lineWidth: isPad ? 2.0 : 1.3)
+            }
         }
 
         // A compact rear-wall equipment recess carries all three buttons. It
