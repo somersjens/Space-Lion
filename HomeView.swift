@@ -549,8 +549,16 @@ struct HomeView: View {
             topicIcon(option, isSelected: isSelected)
                 .frame(maxWidth: .infinity)
                 .frame(height: topicButtonDiameter)
-                .background(isSelected ? character.deepColor : .white.opacity(0.7), in: Circle())
-                .overlay(Circle().stroke(character.deepColor.opacity(isSelected ? 0 : 0.25), lineWidth: 1))
+                .background(
+                    isSelected
+                        ? AnyShapeStyle(LinearGradient(colors: [character.color, character.deepColor],
+                                                       startPoint: .topLeading,
+                                                       endPoint: .bottomTrailing))
+                        : AnyShapeStyle(Color.white.opacity(0.72)),
+                    in: Circle()
+                )
+                .overlay(Circle().stroke(character.color.opacity(isSelected ? 0.62 : 0.30),
+                                         lineWidth: isSelected ? 1.5 : 1))
                 .reportAnchor("topic.\(option.rawValue)")
                 .animation(.snappy(duration: 0.2), value: isSelected)
         }
@@ -615,11 +623,19 @@ struct HomeView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: modeButtonHeight)
                         .padding(.horizontal, isPad ? 8 : 2)
-                        .background(isSelected ? character.deepColor : .white.opacity(0.7),
-                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(
+                            isSelected
+                                ? AnyShapeStyle(LinearGradient(colors: [character.color,
+                                                                        character.deepColor],
+                                                               startPoint: .topLeading,
+                                                               endPoint: .bottomTrailing))
+                                : AnyShapeStyle(Color.white.opacity(0.72)),
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        )
                         .overlay(
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(character.deepColor.opacity(isSelected ? 0 : 0.25), lineWidth: 1)
+                                .stroke(character.color.opacity(isSelected ? 0.58 : 0.30),
+                                        lineWidth: isSelected ? 1.5 : 1)
                         )
                         .foregroundStyle(isSelected ? .white : character.deepColor)
                         .reportAnchor("mode.\(mode.rawValue)")
@@ -675,10 +691,17 @@ struct HomeView: View {
             .foregroundStyle(isSelected ? .white : character.deepColor)
             .padding(.horizontal, inset)
             .frame(height: modeButtonHeight)
-            .background(isSelected ? character.deepColor : .white.opacity(0.62),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(
+                isSelected
+                    ? AnyShapeStyle(LinearGradient(colors: [character.color, character.deepColor],
+                                                   startPoint: .topLeading,
+                                                   endPoint: .bottomTrailing))
+                    : AnyShapeStyle(Color.white.opacity(0.68)),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(character.deepColor.opacity(isSelected ? 0 : 0.28), lineWidth: 1))
+                .stroke(character.color.opacity(isSelected ? 0.58 : 0.32),
+                        lineWidth: isSelected ? 1.5 : 1))
             .reportAnchor("super.\(variant.rawValue)")
             .animation(.snappy(duration: 0.2), value: isSelected)
         }

@@ -28,6 +28,11 @@ struct OnboardingView: View {
 
     private var isPad: Bool { AppLayout.isPad }
     private var contentWidth: CGFloat { isPad ? 680 : 560 }
+    private var onboardingCharacter: AnimalCharacter {
+        CharacterCatalog.character(id: CharacterCatalog.freeCharacterID)
+    }
+    private var accent: Color { onboardingCharacter.color }
+    private var deepAccent: Color { onboardingCharacter.deepColor }
 
     var body: some View {
         ZStack {
@@ -46,12 +51,10 @@ struct OnboardingView: View {
 
                     HStack(alignment: .center, spacing: columnSpacing) {
                         ZStack {
-                            SpaceOrbitHalo(accent: .orange, diameter: artworkSide)
-                            CharacterCatalog.character(id: CharacterCatalog.freeCharacterID)
-                                .artwork
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: artworkSide, height: artworkSide)
+                            SpaceOrbitHalo(accent: accent, diameter: artworkSide)
+                            CharacterPortrait(character: onboardingCharacter,
+                                              side: artworkSide * 0.92,
+                                              magnification: 1.36)
                                 .animation(.spring(response: 0.42, dampingFraction: 0.82), value: step)
                         }
                         .frame(width: artworkSide, height: artworkSide)
@@ -68,7 +71,7 @@ struct OnboardingView: View {
                         .frame(width: stepWidth)
                     }
                     .padding(panelInset)
-                    .spaceMenuPanel(accent: .orange, cornerRadius: 30, prominent: true)
+                    .spaceMenuPanel(accent: accent, cornerRadius: 30, prominent: true)
                     .padding(.horizontal, horizontalPadding)
                     // Reserve the complete flag/back-button band. Long titles
                     // can wrap without ever sliding underneath either control.
@@ -118,7 +121,7 @@ struct OnboardingView: View {
     }
 
     private var onboardingBackground: some View {
-        SpaceMenuBackground(accent: .orange)
+        SpaceMenuBackground(accent: accent)
     }
 
     /// A compact mission-progress rail that makes the three welcome pages read
@@ -127,10 +130,10 @@ struct OnboardingView: View {
         HStack(spacing: isPad ? 9 : 7) {
             ForEach(0..<3, id: \.self) { index in
                 Capsule()
-                    .fill(index <= step ? Color.orange : Color.white.opacity(0.28))
+                    .fill(index <= step ? accent : Color.white.opacity(0.28))
                     .frame(width: index == step ? (isPad ? 36 : 28) : (isPad ? 12 : 9),
                            height: isPad ? 8 : 6)
-                    .shadow(color: index == step ? Color.orange.opacity(0.7) : .clear,
+                    .shadow(color: index == step ? accent.opacity(0.7) : .clear,
                             radius: 5)
             }
         }
@@ -167,14 +170,16 @@ struct OnboardingView: View {
                 .background(.white.opacity(0.6), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(isNameFieldFocused ? Color.orange : .brown.opacity(0.18),
+                        .stroke(isNameFieldFocused ? accent : deepAccent.opacity(0.18),
                                 lineWidth: isNameFieldFocused ? 2 : 1)
                 )
                 .frame(maxWidth: isPad ? 400 : 300)
                 .animation(.snappy(duration: 0.2), value: isNameFieldFocused)
 
             Button("common.continue") { goToSubjects() }
-                .buttonStyle(OnboardingButtonStyle(isPad: isPad))
+                .buttonStyle(OnboardingButtonStyle(isPad: isPad,
+                                                   accent: accent,
+                                                   deepAccent: deepAccent))
                 .frame(width: isPad ? 260 : 210)
         }
     }
@@ -216,10 +221,14 @@ struct OnboardingView: View {
                         .padding(.horizontal, isPad ? 26 : 16)
                         .frame(maxWidth: .infinity, minHeight: isPad ? 68 : 52)
                         .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(accent.opacity(0.26), lineWidth: 1.25)
+                        }
                     }
                     .buttonStyle(OnboardingOptionStyle())
                     .accessibilityIdentifier("onboarding-topic-\(option.rawValue)")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(deepAccent)
                 }
             }
         }
@@ -259,7 +268,9 @@ struct OnboardingView: View {
                         textScale: sizing.scale,
                         allowsTwoLines: sizing.allowsTwoLines,
                         rowHeight: sizing.rowHeight,
-                        isSelected: choice.mode.rawValue == practiceModeRaw
+                        isSelected: choice.mode.rawValue == practiceModeRaw,
+                        accent: accent,
+                        deepAccent: deepAccent
                     )
                 }
                 .buttonStyle(OnboardingOptionStyle())
@@ -429,13 +440,22 @@ private struct OnboardingTitle: View {
 
 private struct OnboardingButtonStyle: ButtonStyle {
     let isPad: Bool
+    let accent: Color
+    let deepAccent: Color
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(isPad ? .title3.weight(.bold) : .headline)
             .frame(maxWidth: .infinity)
             .padding(.vertical, isPad ? 22 : 15)
-            .background(.orange, in: Capsule())
+            .background(
+                LinearGradient(colors: [accent, deepAccent],
+                               startPoint: .topLeading,
+                               endPoint: .bottomTrailing),
+                in: Capsule()
+            )
+            .overlay(Capsule().stroke(.white.opacity(0.46), lineWidth: 1))
+            .shadow(color: accent.opacity(0.28), radius: 8, y: 4)
             .foregroundStyle(.white)
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .opacity(configuration.isPressed ? 0.82 : 1)
@@ -459,6 +479,8 @@ private struct OnboardingChoiceLabel: View {
     let rowHeight: CGFloat
     /// The topic step has no persisted choice yet, so it opts out.
     var isSelected = false
+    let accent: Color
+    let deepAccent: Color
     private var isPad: Bool { AppLayout.isPad }
 
     var body: some View {
@@ -466,7 +488,7 @@ private struct OnboardingChoiceLabel: View {
             Image(systemName: icon)
             .font(isPad ? .title2 : .title3)
             .frame(width: isPad ? 44 : 30)
-                .foregroundStyle(.orange)
+                .foregroundStyle(deepAccent)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.system(size: 20 * textScale, weight: .semibold))
@@ -483,17 +505,18 @@ private struct OnboardingChoiceLabel: View {
             // selected option is unmistakable.
             Image(systemName: isSelected ? "checkmark.circle.fill" : "chevron.forward")
                 .font(isSelected ? .title3.weight(.bold) : .footnote.weight(.bold))
-                .foregroundStyle(isSelected ? .orange : .secondary)
+                .foregroundStyle(isSelected ? deepAccent : .secondary)
         }
         .padding(.horizontal, isPad ? 26 : 16)
         .frame(maxWidth: .infinity)
         .frame(height: rowHeight)
-        .background(isSelected ? AnyShapeStyle(Color.orange.opacity(0.16))
+        .background(isSelected ? AnyShapeStyle(accent.opacity(0.18))
                                : AnyShapeStyle(.white.opacity(0.78)),
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.orange.opacity(isSelected ? 0.9 : 0), lineWidth: 2.5)
+                .stroke(accent.opacity(isSelected ? 0.95 : 0.24),
+                        lineWidth: isSelected ? 2.5 : 1.25)
         )
         .foregroundStyle(SpaceMenuPalette.ink)
         .animation(.easeInOut(duration: 0.18), value: isSelected)

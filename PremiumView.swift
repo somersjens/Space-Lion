@@ -205,6 +205,7 @@ struct PremiumView: View {
                 .foregroundStyle(character.deepColor)
                 .frame(width: 38 * scale, height: 38 * scale)
                 .background(.white.opacity(0.7), in: Circle())
+                .overlay(Circle().stroke(character.color.opacity(0.42), lineWidth: 1.25))
                 .shadow(color: character.deepColor.opacity(0.15), radius: 6, y: 3)
         }
     }
@@ -240,15 +241,6 @@ struct PremiumView: View {
             // ring slightly instead of floating small inside it.
             ZStack {
                 SpaceOrbitHalo(accent: character.color, diameter: heroSize)
-                Circle()
-                    .fill(RadialGradient(
-                        colors: [character.color.opacity(0.35), character.color.opacity(0.05)],
-                        center: .center, startRadius: 6, endRadius: heroSize * 0.8
-                    ))
-                    .frame(width: heroSize, height: heroSize)
-                Circle()
-                    .stroke(character.color.opacity(0.30), lineWidth: 2)
-                    .frame(width: heroSize * 0.92, height: heroSize * 0.92)
                 CharacterPortrait(character: character,
                                   side: heroSize * 0.86,
                                   magnification: 1.75)
@@ -424,12 +416,12 @@ struct PremiumView: View {
             .frame(maxWidth: .infinity)
             .padding(.horizontal, metrics.tilePadding * 0.7)
             .padding(.vertical, metrics.tilePadding)
-            .background(isSelected ? character.color.opacity(0.20) : .white.opacity(0.42),
+            .background(isSelected ? animal.color.opacity(0.22) : animal.skyColor.opacity(0.46),
                         in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(isSelected ? character.color : .clear,
-                            lineWidth: isSelected ? 2 : 0)
+                    .stroke(isSelected ? animal.color : animal.color.opacity(0.24),
+                            lineWidth: isSelected ? 2 : 1)
             }
         }
         .buttonStyle(.plain)
@@ -453,23 +445,23 @@ struct PremiumView: View {
                 .foregroundStyle(.white)
                 .frame(width: metrics.tileBadge * 0.9,
                        height: metrics.tileBadge * 0.9)
-                .background(character.color, in: Circle())
-                .characterTileBadgeStyle(character: character,
+                .background(animal.color, in: Circle())
+                .characterTileBadgeStyle(character: animal,
                                          isUnlocked: true,
                                          size: metrics.tileBadge)
         } else if isStarter {
             Text(verbatim: L(key: "premium.start"))
-                .characterTileBadgeStyle(character: character,
+                .characterTileBadgeStyle(character: animal,
                                          isUnlocked: true,
                                          size: metrics.tileBadge)
         } else if let cards = CharacterUnlockStore.requirement(for: animal.id) {
             Text(verbatim: LNumber(cards))
-                .characterTileBadgeStyle(character: character,
+                .characterTileBadgeStyle(character: animal,
                                          isUnlocked: false,
                                          size: metrics.tileBadge)
         } else {
             Image(systemName: "crown.fill")
-                .characterTileBadgeStyle(character: character,
+                .characterTileBadgeStyle(character: animal,
                                          isUnlocked: false,
                                          size: metrics.tileBadge)
         }

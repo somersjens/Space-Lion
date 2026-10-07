@@ -636,9 +636,7 @@ struct LevelCardView: View {
 
     private var borderColor: Color {
         if status == .recommended { return theme.color }
-        return displayedBest == 0
-            ? Color(white: 0.85)
-            : displayedTier.color(for: theme).opacity(0.35)
+        return theme.color.opacity(displayedBest == 0 ? 0.28 : 0.44)
     }
 
     // MARK: Center score line

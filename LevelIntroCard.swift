@@ -170,7 +170,7 @@ struct LevelIntroCard: View {
                             .padding(.trailing, 22 * scale)
 
                             Rectangle()
-                                .fill(theme.deepColor.opacity(0.14))
+                                .fill(theme.color.opacity(0.26))
                                 .frame(width: 1)
 
                             // The information side deliberately contains only
@@ -277,7 +277,7 @@ struct LevelIntroCard: View {
                     .background(.white.opacity(0.7),
                                 in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(theme.deepColor.opacity(0.14), lineWidth: 1))
+                        .stroke(theme.color.opacity(0.32), lineWidth: 1.25))
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("intro-back")
@@ -388,7 +388,7 @@ struct LevelIntroCard: View {
                                             : AnyShapeStyle(theme.skyColor))
                 .clipShape(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
-                    .stroke(theme.deepColor.opacity(isTutorialArmed ? 0 : 0.15), lineWidth: 1))
+                    .stroke(theme.color.opacity(isTutorialArmed ? 0.50 : 0.24), lineWidth: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -416,7 +416,7 @@ struct LevelIntroCard: View {
             .background(theme.skyColor)
             .clipShape(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
-                .stroke(theme.deepColor.opacity(0.15), lineWidth: 1))
+                .stroke(theme.color.opacity(0.24), lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -469,7 +469,7 @@ struct LevelIntroCard: View {
             in: RoundedRectangle(cornerRadius: 16, style: .continuous)
         )
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .stroke(theme.deepColor.opacity(0.10), lineWidth: 1))
+            .stroke(theme.color.opacity(0.20), lineWidth: 1))
     }
 
     private struct IntroFeature: Identifiable {

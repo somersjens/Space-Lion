@@ -30,7 +30,7 @@ struct SpaceMenuBackground: View {
             ZStack {
                 LinearGradient(
                     colors: [SpaceMenuPalette.void,
-                             SpaceMenuPalette.nebula,
+                             Color(red: 0.035, green: 0.065, blue: 0.18),
                              SpaceMenuPalette.horizon],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
@@ -50,7 +50,9 @@ struct SpaceMenuBackground: View {
 
                 Circle()
                     .fill(RadialGradient(
-                        colors: [Color.cyan.opacity(0.18), .clear],
+                        colors: [SpaceMenuPalette.starlight.opacity(0.15),
+                                 accent.opacity(0.05),
+                                 .clear],
                         center: .center,
                         startRadius: 5,
                         endRadius: diameter * 0.36
@@ -196,6 +198,16 @@ private struct SpaceMenuPanelModifier: ViewModifier {
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .fill(LinearGradient(
+                                colors: [accent.opacity(prominent ? 0.11 : 0.08),
+                                         .clear,
+                                         accent.opacity(prominent ? 0.07 : 0.05)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ))
+                    }
                     .overlay(alignment: .topTrailing) {
                         Circle()
                             .fill(RadialGradient(colors: [accent.opacity(0.22), .clear],
@@ -210,18 +222,19 @@ private struct SpaceMenuPanelModifier: ViewModifier {
                     .overlay {
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .stroke(
-                                LinearGradient(colors: [.white,
+                                LinearGradient(colors: [.white.opacity(0.96),
+                                                        accent.opacity(0.90),
                                                         SpaceMenuPalette.starlight.opacity(0.72),
-                                                        accent.opacity(0.60)],
+                                                        accent.opacity(0.74)],
                                                startPoint: .topLeading,
                                                endPoint: .bottomTrailing),
-                                lineWidth: prominent ? 2 : 1.5
+                                lineWidth: prominent ? 2.4 : 1.7
                             )
                     }
                     .overlay {
                         RoundedRectangle(cornerRadius: max(1, cornerRadius - 4), style: .continuous)
                             .inset(by: 4)
-                            .stroke(SpaceMenuPalette.horizon.opacity(0.12), lineWidth: 1)
+                            .stroke(accent.opacity(0.18), lineWidth: 1)
                     }
             }
             .shadow(color: accent.opacity(prominent ? 0.28 : 0.18),

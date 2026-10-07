@@ -191,15 +191,6 @@ struct ResultView: View {
         // decorative ring instead of leaving the character looking tiny.
         return ZStack {
             SpaceOrbitHalo(accent: character.color, diameter: heroSize)
-            Circle()
-                .fill(RadialGradient(
-                    colors: [character.color.opacity(0.35), character.color.opacity(0.05)],
-                    center: .center, startRadius: 6, endRadius: heroSize * 0.8
-                ))
-                .frame(width: heroSize, height: heroSize)
-            Circle()
-                .stroke(character.color.opacity(0.30), lineWidth: 2)
-                .frame(width: heroSize * 0.92, height: heroSize * 0.92)
             CharacterPortrait(character: character,
                               side: heroSize * 0.86,
                               magnification: 1.75)
