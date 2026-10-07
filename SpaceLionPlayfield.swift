@@ -1364,6 +1364,10 @@ private struct SpaceshipCockpit: View {
         // it continue over both side walls at exactly the same horizon as the
         // screen sill and the bottom of the answer racks.
         drawFloor(in: context, size: size, top: floorTop, time: 0)
+        // One uninterrupted zipper of navigation lights ties the full-width
+        // ceiling and floor joints together after every structural layer has
+        // been painted, so neither the frame nor the deck can clip it.
+        drawBoundaryLightChains(in: context, size: size)
     }
 
     private func drawAnimated(in context: GraphicsContext, size: CGSize, time: TimeInterval) {
@@ -1739,15 +1743,6 @@ private struct SpaceshipCockpit: View {
         context.stroke(highlight, with: .color(.white.opacity(0.30)),
                        lineWidth: isPad ? 1.8 : 1.2)
 
-        let headerHeight = bottom - top
-        for (index, fraction) in ([0.24, 0.50, 0.76] as [CGFloat]).enumerated() {
-            lightBar(context,
-                     center: CGPoint(x: window.minX + window.width * fraction,
-                                     y: top + headerHeight * 0.53),
-                     length: window.width * (index == 1 ? 0.105 : 0.075),
-                     thickness: isPad ? 3.2 : 2.2,
-                     color: index == 1 ? orange : cyan)
-        }
     }
 
     private func drawVent(_ context: GraphicsContext, rect: CGRect) {
@@ -1825,8 +1820,10 @@ private struct SpaceshipCockpit: View {
                         startPoint: CGPoint(x: outerX, y: vanishingY),
                         endPoint: CGPoint(x: outerModuleX, y: vanishingY)))
 
-        // Broad wall facets share the same vanishing point. Their seams are
-        // depth lines, not vertical cage bars.
+        // Broad wall facets share the same vanishing point. First paint the
+        // complete surface, then lay one continuous recessed power bus over
+        // it. Structural ribs are redrawn last, so the bus passes convincingly
+        // behind the wall construction instead of colliding with it.
         let facetStops: [CGFloat] = [0, 0.235, 0.50, 0.765, 1]
         for index in 0..<(facetStops.count - 1) {
             let backTop = wallTop + wallHeight * facetStops[index]
@@ -1840,123 +1837,81 @@ private struct SpaceshipCockpit: View {
             context.fill(facet,
                          with: .linearGradient(
                             Gradient(colors: index.isMultiple(of: 2)
-                                     ? [Color(red: 0.035, green: 0.055, blue: 0.13),
-                                        Color(red: 0.20, green: 0.27, blue: 0.47),
-                                        Color(red: 0.06, green: 0.095, blue: 0.22)]
-                                     : [Color(red: 0.015, green: 0.025, blue: 0.075),
-                                        Color(red: 0.11, green: 0.17, blue: 0.33),
-                                        Color(red: 0.025, green: 0.04, blue: 0.11)]),
-                            startPoint: wallPoint(backY: backTop, depth: 0.08),
-                            endPoint: wallPoint(backY: backBottom, depth: 0.92)))
+                                     ? [Color(red: 0.025, green: 0.045, blue: 0.12),
+                                        Color(red: 0.17, green: 0.25, blue: 0.46),
+                                        Color(red: 0.045, green: 0.08, blue: 0.20)]
+                                     : [Color(red: 0.012, green: 0.025, blue: 0.07),
+                                        Color(red: 0.09, green: 0.16, blue: 0.32),
+                                        Color(red: 0.020, green: 0.04, blue: 0.105)]),
+                            startPoint: wallPoint(backY: backTop, depth: 0.06),
+                            endPoint: wallPoint(backY: backBottom, depth: 0.94)))
+        }
+
+        let busDepth: CGFloat = 0.50
+        let busInset = wallHeight * 0.045
+        var powerBus = Path()
+        powerBus.move(to: wallPoint(backY: wallTop + busInset, depth: busDepth))
+        powerBus.addLine(to: wallPoint(backY: wallBottom - busInset,
+                                      depth: busDepth + 0.025))
+        context.stroke(powerBus, with: .color(.black.opacity(0.86)),
+                       lineWidth: isPad ? 13 : 8)
+        context.stroke(powerBus, with: .color(metalLight.opacity(0.34)),
+                       lineWidth: isPad ? 7 : 4.5)
+        var busGlow = context
+        busGlow.blendMode = .plusLighter
+        busGlow.stroke(powerBus, with: .color(cyan.opacity(0.24)),
+                       lineWidth: isPad ? 4 : 2.5)
+        context.stroke(powerBus, with: .color(cyan.opacity(0.72)),
+                       lineWidth: isPad ? 1.4 : 0.9)
+
+        for index in 0..<(facetStops.count - 1) {
+            let backTop = wallTop + wallHeight * facetStops[index]
+            let backBottom = wallTop + wallHeight * facetStops[index + 1]
+            let bandHeight = backBottom - backTop
+            let circuitTop = backTop + bandHeight * 0.22
+            let circuitBottom = backBottom - bandHeight * 0.22
+            let circuitColor = index.isMultiple(of: 2) ? cyan : orange
+
+            // Branches and their illuminated terminals are sized from their
+            // own facet. They never enter the empty margin beside a rib.
+            for branch in 0..<3 {
+                let progress = (CGFloat(branch) + 1) / 4
+                let branchY = circuitTop + (circuitBottom - circuitTop) * progress
+                let start = wallPoint(backY: branchY, depth: busDepth)
+                let endDepth: CGFloat = branch == 1 ? 0.20 : 0.27
+                let end = wallPoint(backY: branchY, depth: endDepth)
+                var trace = Path()
+                trace.move(to: start)
+                trace.addLine(to: end)
+                context.stroke(trace, with: .color(.black.opacity(0.88)),
+                               style: StrokeStyle(lineWidth: isPad ? 7 : 4.5,
+                                                  lineCap: .round))
+                context.stroke(trace,
+                               with: .color(circuitColor.opacity(branch == 1 ? 0.92 : 0.62)),
+                               style: StrokeStyle(lineWidth: isPad ? 2.2 : 1.4,
+                                                  lineCap: .round))
+
+                let nodeRadius: CGFloat = isPad ? 3.2 : 2.1
+                let node = Path(ellipseIn: CGRect(x: end.x - nodeRadius,
+                                                  y: end.y - nodeRadius,
+                                                  width: nodeRadius * 2,
+                                                  height: nodeRadius * 2))
+                busGlow.fill(node, with: .color(circuitColor.opacity(0.55)))
+                context.fill(node, with: .color(.white.opacity(0.76)))
+            }
 
             guard index > 0 else { continue }
             let seamY = backTop
             var rib = Path()
             rib.move(to: wallPoint(backY: seamY, depth: 0))
             rib.addLine(to: wallPoint(backY: seamY, depth: 0.98))
-            context.stroke(rib, with: .color(.black.opacity(0.88)),
-                           lineWidth: isPad ? 10 : 7)
-            context.stroke(rib, with: .color(metalLight.opacity(0.46)),
+            context.stroke(rib, with: .color(.black.opacity(0.90)),
+                           lineWidth: isPad ? 11 : 7)
+            context.stroke(rib, with: .color(metalLight.opacity(0.50)),
                            lineWidth: isPad ? 4.2 : 2.8)
             context.stroke(rib.offsetBy(dx: 0, dy: -1.4),
-                           with: .color(index == 2 ? cyan.opacity(0.42) : orange.opacity(0.26)),
+                           with: .color(index == 2 ? cyan.opacity(0.46) : orange.opacity(0.30)),
                            lineWidth: isPad ? 1.8 : 1.1)
-        }
-
-        // Recessed instrument panels occupy the space that is actually
-        // available between ceiling and floor. Their count, height and gaps
-        // are derived here, so no last panel is ever sliced off by the deck.
-        let panelInset = max(buttonSize * 0.10, isPad ? 13 : 8)
-        let panelTop = wallTop + panelInset
-        let panelBottom = wallBottom - panelInset
-        let availablePanelHeight = max(1, panelBottom - panelTop)
-        let panelGap = max(buttonSize * 0.09, isPad ? 12 : 7)
-        let preferredPanelHeight = buttonSize * 0.50
-        let fittingCount = Int((availablePanelHeight + panelGap)
-                               / (preferredPanelHeight + panelGap))
-        let panelCount = max(1, min(4, fittingCount))
-        let panelHeight = max(1,
-                              (availablePanelHeight
-                               - panelGap * CGFloat(panelCount - 1))
-                              / CGFloat(panelCount))
-        let lift = min(buttonSize * 0.075, isPad ? 12 : 8)
-        for index in 0..<panelCount {
-            let backTop = panelTop + CGFloat(index) * (panelHeight + panelGap)
-            let backBottom = backTop + panelHeight
-            let nearDepth: CGFloat = 0.08
-            let farDepth: CGFloat = 0.70
-
-            var face = Path()
-            face.move(to: wallPoint(backY: backTop, depth: nearDepth))
-            face.addLine(to: wallPoint(backY: backTop, depth: farDepth))
-            face.addLine(to: wallPoint(backY: backBottom, depth: farDepth + 0.035))
-            face.addLine(to: wallPoint(backY: backBottom, depth: nearDepth + 0.02))
-            face.closeSubpath()
-
-            context.fill(face.offsetBy(dx: outward * lift * 0.34, dy: lift * 0.58),
-                         with: .color(.black.opacity(0.66)))
-
-            let lowerNear = wallPoint(backY: backBottom, depth: nearDepth + 0.02)
-            let lowerFar = wallPoint(backY: backBottom, depth: farDepth + 0.035)
-            var lowerFace = Path()
-            lowerFace.move(to: lowerNear)
-            lowerFace.addLine(to: lowerFar)
-            lowerFace.addLine(to: CGPoint(x: lowerFar.x + outward * lift * 0.26,
-                                          y: lowerFar.y + lift * 0.56))
-            lowerFace.addLine(to: CGPoint(x: lowerNear.x + outward * lift * 0.26,
-                                          y: lowerNear.y + lift * 0.56))
-            lowerFace.closeSubpath()
-            context.fill(lowerFace,
-                         with: .linearGradient(
-                            Gradient(colors: [metal.opacity(0.72), .black.opacity(0.96)]),
-                            startPoint: lowerNear,
-                            endPoint: CGPoint(x: lowerNear.x, y: lowerNear.y + lift)))
-
-            context.fill(face,
-                         with: .linearGradient(
-                            Gradient(colors: [metalLight.opacity(0.72),
-                                              Color(red: 0.09, green: 0.14, blue: 0.29),
-                                              Color(red: 0.022, green: 0.035, blue: 0.105)]),
-                            startPoint: wallPoint(backY: backTop, depth: nearDepth),
-                            endPoint: wallPoint(backY: backBottom, depth: farDepth)))
-            context.stroke(face, with: .color(.black.opacity(0.86)),
-                           lineWidth: isPad ? 3.2 : 2)
-
-            var topHighlight = Path()
-            topHighlight.move(to: wallPoint(backY: backTop, depth: nearDepth))
-            topHighlight.addLine(to: wallPoint(backY: backTop, depth: farDepth))
-            context.stroke(topHighlight, with: .color(.white.opacity(0.32)),
-                           lineWidth: isPad ? 2.2 : 1.4)
-
-            // A dark inset display and several unequal signal bars make each
-            // panel read as equipment rather than an unexplained metal box.
-            let displayTop = backTop + panelHeight * 0.20
-            let displayBottom = backBottom - panelHeight * 0.20
-            var display = Path()
-            display.move(to: wallPoint(backY: displayTop, depth: 0.19))
-            display.addLine(to: wallPoint(backY: displayTop, depth: 0.59))
-            display.addLine(to: wallPoint(backY: displayBottom, depth: 0.61))
-            display.addLine(to: wallPoint(backY: displayBottom, depth: 0.20))
-            display.closeSubpath()
-            context.fill(display, with: .color(Color(red: 0.008, green: 0.018, blue: 0.055)))
-            context.stroke(display, with: .color(cyan.opacity(0.22)), lineWidth: 1)
-
-            let signalColor = index.isMultiple(of: 2) ? cyan : orange
-            for row in 0..<3 {
-                let rowY = displayTop
-                    + (displayBottom - displayTop) * (0.27 + CGFloat(row) * 0.23)
-                let start = wallPoint(backY: rowY, depth: 0.25)
-                let endDepth: CGFloat = row == 1 ? 0.53 : (row == 0 ? 0.47 : 0.42)
-                let end = wallPoint(backY: rowY, depth: endDepth)
-                var signal = Path()
-                signal.move(to: start)
-                signal.addLine(to: end)
-                context.stroke(signal, with: .color(.black.opacity(0.88)),
-                               lineWidth: isPad ? 5.5 : 3.5)
-                context.stroke(signal,
-                               with: .color(signalColor.opacity(row == 1 ? 0.90 : 0.58)),
-                               lineWidth: isPad ? 2.0 : 1.3)
-            }
         }
 
         // A compact rear-wall equipment recess carries all three buttons. It
@@ -2125,6 +2080,135 @@ private struct SpaceshipCockpit: View {
         }
     }
 
+    /// Repeats the sill's navigation-light rhythm across the complete room
+    /// joints, including both perspective shoulders. The upper and lower rows
+    /// share the same cadence so the cockpit reads as one manufactured shell.
+    private func drawBoundaryLightChains(in context: GraphicsContext,
+                                         size: CGSize) {
+        let leftControlX = layout.buttonPoints.first?.x ?? layout.leftEdge
+        let rightControlX = layout.buttonPoints
+            .dropFirst(GameConfig.answerColumnCount).first?.x ?? layout.rightEdge
+        let leftJoin = leftControlX - layout.buttonSize * 0.58
+        let rightJoin = rightControlX + layout.buttonSize * 0.58
+
+        let upperBackY = layout.ceilingJointY
+        let upperLeftY = sideWallCanvasY(backY: upperBackY,
+                                         innerX: leftJoin,
+                                         outerX: -2,
+                                         canvasX: 0)
+        let upperRightY = sideWallCanvasY(backY: upperBackY,
+                                          innerX: rightJoin,
+                                          outerX: size.width + 2,
+                                          canvasX: size.width)
+        let upperInset: CGFloat = isPad ? 7 : 4.5
+        drawLightChain(in: context,
+                       points: [CGPoint(x: 0, y: upperLeftY + upperInset),
+                                CGPoint(x: leftJoin, y: upperBackY + upperInset),
+                                CGPoint(x: rightJoin, y: upperBackY + upperInset),
+                                CGPoint(x: size.width, y: upperRightY + upperInset)],
+                       startsWithWarmLight: true)
+
+        let lowerBackY = layout.floorTop
+        let lowerLeftY = sideWallCanvasY(backY: lowerBackY,
+                                         innerX: leftJoin,
+                                         outerX: -2,
+                                         canvasX: 0)
+        let lowerRightY = sideWallCanvasY(backY: lowerBackY,
+                                          innerX: rightJoin,
+                                          outerX: size.width + 2,
+                                          canvasX: size.width)
+        let lowerInset: CGFloat = isPad ? 8 : 5
+        drawLightChain(in: context,
+                       points: [CGPoint(x: 0, y: lowerLeftY - lowerInset),
+                                CGPoint(x: leftJoin, y: lowerBackY - lowerInset),
+                                CGPoint(x: rightJoin, y: lowerBackY - lowerInset),
+                                CGPoint(x: size.width, y: lowerRightY - lowerInset)],
+                       startsWithWarmLight: false)
+    }
+
+    private func drawLightChain(in context: GraphicsContext,
+                                points: [CGPoint],
+                                startsWithWarmLight: Bool) {
+        guard points.count > 1 else { return }
+        let preferredDash: CGFloat = isPad ? 48 : 31
+        let preferredGap: CGFloat = isPad ? 30 : 19
+        let thickness: CGFloat = isPad ? 3.4 : 2.2
+        var lightIndex = startsWithWarmLight ? 2 : 0
+
+        // The lamps sit in one continuous recessed carrier. Even where a lamp
+        // is deliberately absent, this metal-and-energy strip keeps the edge
+        // connected instead of dissolving into unrelated floating dashes.
+        var carrier = Path()
+        carrier.move(to: points[0])
+        for point in points.dropFirst() { carrier.addLine(to: point) }
+        let carrierStyle = StrokeStyle(lineWidth: thickness * 3.4,
+                                       lineCap: .round,
+                                       lineJoin: .round)
+        context.stroke(carrier, with: .color(.black.opacity(0.88)),
+                       style: carrierStyle)
+        context.stroke(carrier, with: .color(metalLight.opacity(0.58)),
+                       style: StrokeStyle(lineWidth: thickness * 2.25,
+                                          lineCap: .round,
+                                          lineJoin: .round))
+        context.stroke(carrier, with: .color(metalDark.opacity(0.96)),
+                       style: StrokeStyle(lineWidth: thickness * 1.35,
+                                          lineCap: .round,
+                                          lineJoin: .round))
+        var carrierGlow = context
+        carrierGlow.blendMode = .plusLighter
+        carrierGlow.stroke(carrier, with: .color(cyan.opacity(0.20)),
+                           style: StrokeStyle(lineWidth: thickness * 0.70,
+                                              lineCap: .round,
+                                              lineJoin: .round))
+
+        for segment in 0..<(points.count - 1) {
+            let start = points[segment]
+            let end = points[segment + 1]
+            let dx = end.x - start.x
+            let dy = end.y - start.y
+            let length = hypot(dx, dy)
+            guard length > 2 else { continue }
+
+            let count = max(1, Int((length + preferredGap)
+                                   / (preferredDash + preferredGap)))
+            let step = length / CGFloat(count)
+            let dashLength = min(preferredDash, step * 0.66)
+            let ux = dx / length
+            let uy = dy / length
+
+            for dash in 0..<count {
+                let distance = step * (CGFloat(dash) + 0.5)
+                let centre = CGPoint(x: start.x + ux * distance,
+                                     y: start.y + uy * distance)
+                let half = dashLength * 0.5
+                let a = CGPoint(x: centre.x - ux * half,
+                                y: centre.y - uy * half)
+                let b = CGPoint(x: centre.x + ux * half,
+                                y: centre.y + uy * half)
+                var mark = Path()
+                mark.move(to: a)
+                mark.addLine(to: b)
+
+                let color = lightIndex.isMultiple(of: 5) ? orange : cyan
+                context.stroke(mark, with: .color(.black.opacity(0.82)),
+                               style: StrokeStyle(lineWidth: thickness * 2.4,
+                                                  lineCap: .round))
+                var glow = context
+                glow.blendMode = .plusLighter
+                glow.stroke(mark, with: .color(color.opacity(0.34)),
+                            style: StrokeStyle(lineWidth: thickness * 4.2,
+                                               lineCap: .round))
+                context.stroke(mark, with: .color(color.opacity(0.96)),
+                               style: StrokeStyle(lineWidth: thickness,
+                                                  lineCap: .round))
+                context.stroke(mark, with: .color(.white.opacity(0.50)),
+                               style: StrokeStyle(lineWidth: max(0.7, thickness * 0.28),
+                                                  lineCap: .round))
+                lightIndex += 1
+            }
+        }
+    }
+
     private func drawSill(in context: GraphicsContext, window: CGRect, floorTop: CGFloat) {
         let top = window.maxY + frameWidth * 0.5
         guard floorTop > top, layout.rightEdge > layout.leftEdge else { return }
@@ -2137,14 +2221,6 @@ private struct SpaceshipCockpit: View {
                                            endPoint: CGPoint(x: 0, y: sill.maxY)))
         seam(context, from: CGPoint(x: sill.minX, y: sill.minY),
              to: CGPoint(x: sill.maxX, y: sill.minY))
-
-        for fraction in [0.14, 0.32, 0.5, 0.68, 0.86] as [CGFloat] {
-            lightBar(context,
-                     center: CGPoint(x: sill.minX + sill.width * fraction, y: sill.midY),
-                     length: sill.width * 0.09,
-                     thickness: isPad ? 3.5 : 2.5,
-                     color: cyan)
-        }
 
         var lip = Path()
         lip.move(to: CGPoint(x: sill.minX, y: sill.maxY - 0.75))
