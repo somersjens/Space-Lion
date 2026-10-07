@@ -431,7 +431,7 @@ struct GameView: View {
         cockpitPanel {
             VStack(spacing: isPad ? 5 : 3) {
                 HStack(spacing: isPad ? 8 : 5) {
-                    Image(systemName: "scope")
+                    CurrencyIcon(size: isPad ? 24 : 17)
                         .foregroundStyle(hudCyan)
                     Text(verbatim: "\(model.cards) / \(request.board.maximum)")
                         .environment(\.layoutDirection, .leftToRight)

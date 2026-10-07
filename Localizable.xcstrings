@@ -28955,7 +28955,7 @@
         }
       }
     },
-    "levelIntro.cardsBullet.hoop %lld" : {
+    "levelIntro.cardsBullet.stars %lld" : {
       "comment" : "The count is always 20, 30, 40 or 50 (GameConfig level maximums), which every language treats alike, so this needs no other plural form.",
       "extractionState" : "manual",
       "localizations" : {
@@ -29058,7 +29058,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You can collect up to **%lld answers** in this level."
+            "value" : "You can collect up to **%lld stars** in this level."
           }
         },
         "es" : {
@@ -29274,7 +29274,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Je kunt in dit level maximaal **%lld antwoorden** verzamelen."
+            "value" : "Je kunt in dit level maximaal **%lld sterren** verzamelen."
           }
         },
         "or" : {

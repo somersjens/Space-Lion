@@ -3,7 +3,7 @@
 //  Math Memory
 //
 //  The card shown before a level starts: what kind of sums it holds, which
-//  levels the questions are drawn from, and how many cards can be collected.
+//  levels the questions are drawn from, and how many stars can be collected.
 //  Restored from the original start screen; only the settings it offers have
 //  changed, since lives and the answer helper are no longer optional here.
 //
@@ -50,9 +50,9 @@ enum LevelIntro {
         // order button — and picking the right card out of the ones on offer.
         let levelLine = modeLine(for: board)
 
-        let cardsLine = L(key: "levelIntro.cardsBullet.hoop %lld", count: board.maximum)
+        let starsLine = L(key: "levelIntro.cardsBullet.stars %lld", count: board.maximum)
 
-        return (title, [topicLine, levelLine, cardsLine])
+        return (title, [topicLine, levelLine, starsLine])
     }
 
     /// The middle line, written for the mode being played. Mixed is the only
