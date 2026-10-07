@@ -26,7 +26,7 @@ A string that changes with a count gets **two rows**, told apart by `form`:
 
 | form | what to write |
 |---|---|
-| `one` | the wording for a count of one — "1 hoop", "1 hoepel" |
+| `one` | the wording for a count of one — "1 star", "1 ster" |
 | `other` | required. The wording for a plural count, and what gets used whenever `one` does not apply |
 
 Languages that word one no differently from the rest (Japanese, Chinese, Korean,

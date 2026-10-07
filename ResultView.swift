@@ -21,7 +21,7 @@ struct ResultView: View {
     @State private var isPresented = false
     @State private var badgeLanded = false
     @State private var shineSweep = false
-    @State private var showsHoopCelebration = false
+    @State private var showsCurrencyCelebration = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -97,8 +97,8 @@ struct ResultView: View {
             // Layered above the card, so the swarm passes over the result
             // rather than behind it. It starts once the card entrance is
             // underway.
-            if showsHoopCelebration {
-                HoopCelebration(color: character.deepColor)
+            if showsCurrencyCelebration {
+                CurrencyCelebration(color: character.deepColor)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
             }
@@ -120,7 +120,7 @@ struct ResultView: View {
             guard celebrates else { return }
             if !reduceMotion {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
-                    showsHoopCelebration = true
+                    showsCurrencyCelebration = true
                     AppAudio.shared.playEndCelebration()
                 }
             }
@@ -388,11 +388,11 @@ struct ResultView: View {
     }
 }
 
-/// Hoops rise over a filled board or a new personal best.
-private struct HoopCelebration: View {
+/// Currency stars rise over a filled board or a new personal best.
+private struct CurrencyCelebration: View {
     let color: Color
 
-    @State private var hoops: [CelebrationHoop]
+    @State private var stars: [CelebrationStar]
     @State private var startedAt = Date()
     /// Every fly is drawn from the elapsed time, so once the last one has left
     /// the top edge there is nothing further to redraw and the clock can stop.
@@ -402,12 +402,12 @@ private struct HoopCelebration: View {
         self.color = color
         // Enough to read as a swarm, few enough to leave the card readable
         // underneath it.
-        _hoops = State(initialValue: (0..<16).map { _ in CelebrationHoop() })
+        _stars = State(initialValue: (0..<16).map { _ in CelebrationStar() })
     }
 
     /// When the slowest fly is gone, plus a moment's margin.
     private var span: Double {
-        (hoops.map { $0.delay + $0.riseDuration }.max() ?? 0) + 0.2
+        (stars.map { $0.delay + $0.riseDuration }.max() ?? 0) + 0.2
     }
 
     var body: some View {
@@ -415,8 +415,8 @@ private struct HoopCelebration: View {
             TimelineView(.animation(paused: hasSettled)) { context in
                 let elapsed = context.date.timeIntervalSince(startedAt)
                 ZStack {
-                    ForEach(hoops) { hoop in
-                        CelebrationHoopView(hoop: hoop, elapsed: elapsed,
+                    ForEach(stars) { star in
+                        CelebrationStarView(star: star, elapsed: elapsed,
                                            area: proxy.size, color: color)
                     }
                 }
@@ -432,7 +432,7 @@ private struct HoopCelebration: View {
     }
 }
 
-private struct CelebrationHoop: Identifiable {
+private struct CelebrationStar: Identifiable {
     let id = UUID()
     /// Share of the width the fly climbs around.
     let x = CGFloat.random(in: 0.06...0.94)
@@ -450,26 +450,26 @@ private struct CelebrationHoop: Identifiable {
     let beat = Double.random(in: 15...21)
 }
 
-private struct CelebrationHoopView: View {
-    let hoop: CelebrationHoop
+private struct CelebrationStarView: View {
+    let star: CelebrationStar
     let elapsed: TimeInterval
     let area: CGSize
     let color: Color
 
     var body: some View {
-        let t = (elapsed - hoop.delay) / hoop.riseDuration
+        let t = (elapsed - star.delay) / star.riseDuration
 
         if t >= 0, t <= 1 {
-            let angle = t * hoop.waves * 2 * .pi + hoop.phase
+            let angle = t * star.waves * 2 * .pi + star.phase
             // The climb is linear: a fly holds its speed, it does not coast to
             // a stop the way a falling bubble did.
-            let travel = area.height + hoop.size * 2
-            let spinPhase = elapsed * hoop.beat * 2 * .pi + hoop.phase
+            let travel = area.height + star.size * 2
+            let spinPhase = elapsed * star.beat * 2 * .pi + star.phase
 
             // Just the food itself, in the character's own colour. It used to
             // carry an enlarged white copy behind it for legibility, which read
             // as a halo around every single one of them.
-            CurrencyIcon(size: hoop.size)
+            CurrencyIcon(size: star.size)
                 .foregroundStyle(color)
                 // Wings beating: the body squeezes narrow and springs back.
                 .scaleEffect(x: 1 - 0.1 * abs(sin(spinPhase)), y: 1)
@@ -477,10 +477,10 @@ private struct CelebrationHoopView: View {
                 .rotationEffect(.degrees(cos(angle) * 15))
                 .opacity(fade(at: t))
                 .position(
-                    x: area.width * hoop.x + sin(angle) * hoop.sway,
-                    y: area.height + hoop.size - travel * t
+                    x: area.width * star.x + sin(angle) * star.sway,
+                    y: area.height + star.size - travel * t
                         // A small bob on the wingbeat itself.
-                        + sin(spinPhase) * hoop.size * 0.05
+                        + sin(spinPhase) * star.size * 0.05
                 )
         }
     }

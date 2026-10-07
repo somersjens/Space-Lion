@@ -5,6 +5,7 @@ private enum LionMotionPhase: Equatable {
     case orientingOut
     case travellingOut
     case contact
+    case retractingFinger
     case pushingOff
     case travellingHome
     case settling
@@ -49,6 +50,11 @@ struct SpaceLionPlayfield: View {
     @State private var phaseStarted = Date()
     @State private var actionRotation = 0.0
     @State private var idleRotationOffset = 0.0
+    /// Residual angular momentum after a correct-answer flip. It keeps moving
+    /// in the flip direction, eases away, and hands back to the perpetual idle
+    /// sway instead of stopping dead in the centre.
+    @State private var spinCarryStarted: Date?
+    @State private var spinCarryDistance = 0.0
     @State private var driftAmount: CGFloat = 1
     @State private var isMoving = false
     @State private var selectedOptionID: UUID?
@@ -167,11 +173,11 @@ struct SpaceLionPlayfield: View {
             select(option,
                    at: point,
                    from: centre,
-                   buttonSize: size,
                    lionSize: lionSize)
         } label: {
             SpaceConsoleButton(text: option.text,
                                size: size,
+                               accentColor: character.color,
                                feedback: feedback,
                                isPressed: isPressed)
         }
@@ -206,9 +212,9 @@ struct SpaceLionPlayfield: View {
             let driftY = reduceMotion
                 ? 0
                 : cos(time * 0.78) * metrics.lionSize * 0.062 * driftAmount
-            let rotation = isMoving
-                ? actionRotation
-                : idleRotation(at: timeline.date)
+            let rotation = (!isMoving || motionPhase == .settling)
+                ? idleRotation(at: timeline.date)
+                : actionRotation
             let frameName = lionFrameName(at: timeline.date)
             let breathe = (reduceMotion || isMoving) ? 1 : (1 + sin(time * 1.35) * 0.022)
 
@@ -272,14 +278,23 @@ struct SpaceLionPlayfield: View {
         case .idle, .orientingOut:
             return "1.1"
         case .travellingOut:
-            // One tuck, then the pointing pose for the rest of the glide.
-            // Stepping through every in-between frame shifted the body and
-            // read as a hitch along the path.
-            return elapsed < 0.18 ? "1.2" : "1.5"
-        case .contact, .pushingOff:
+            // Hold one pose for the complete glide. Changing sprite alignment
+            // halfway through was the small hitch visible on the old path.
             return "1.5"
+        case .contact:
+            return "1.5"
+        case .retractingFinger:
+            // Contact is over: visibly fold the pointing arm away before a
+            // correct-answer flip is allowed to begin.
+            if elapsed < retractFingerDuration * 0.34 { return "1.4" }
+            if elapsed < retractFingerDuration * 0.68 { return "1.3" }
+            return "1.2"
+        case .pushingOff:
+            return selectedWasCorrect ? "1.2" : "1.5"
         case .travellingHome:
-            return elapsed < 0.28 ? "1.5" : "1.2"
+            // A wrong answer deliberately holds the pointing pose a little
+            // longer; a correct answer has already retracted before its flip.
+            return selectedWasCorrect || elapsed >= 0.28 ? "1.2" : "1.5"
         case .settling:
             return elapsed < 0.34 ? "1.2" : "1.1"
         }
@@ -307,7 +322,6 @@ struct SpaceLionPlayfield: View {
     private func select(_ option: AnswerOption,
                         at target: CGPoint,
                         from centre: CGPoint,
-                        buttonSize: CGFloat,
                         lionSize: CGFloat) {
         guard isLive, !isMoving, !tutorial.isRunning, let round,
               round.options.contains(where: { $0.id == option.id }) else { return }
@@ -327,18 +341,25 @@ struct SpaceLionPlayfield: View {
         let distance = max(1, hypot(dx, dy))
         let unitX = dx / distance
         let unitY = dy / distance
-        let fingerReach = lionSize * 0.44
-        let buttonRadius = buttonSize * 0.50
-        let centreDistance = min(distance, fingerReach + buttonRadius)
-        let destination = CGSize(width: dx - unitX * centreDistance,
-                                 height: dy - unitY * centreDistance)
-        let pressDepth = min(buttonSize * 0.10, lionSize * 0.055)
-        let pressedDestination = CGSize(width: destination.width + unitX * pressDepth,
-                                        height: destination.height + unitY * pressDepth)
+        // Calibrated against the leading pixel of the index finger in frame
+        // 1.5. The source is 512 x 543 and is aspect-fitted into a square, so
+        // this is the fingertip's vector from the rendered frame centre.
+        let fingerVector = CGSize(width: lionSize * 0.445,
+                                  height: lionSize * -0.043)
+        let fingerReach = hypot(fingerVector.width, fingerVector.height)
+        // Put the fingertip on the button centre, rather than stopping one
+        // button radius early and merely touching the near rim.
+        let contactDestination = CGSize(width: dx - unitX * fingerReach,
+                                        height: dy - unitY * fingerReach)
 
-        let travelAngle = atan2(dy, dx) * 180 / .pi
+        // Turn the complete character toward the answer. A left-side answer
+        // is reached through rotation, never by mirroring the artwork.
+        let fingerAngle = atan2(fingerVector.height, fingerVector.width) * 180 / .pi
+        let travelAngle = atan2(dy, dx) * 180 / .pi - fingerAngle
         let currentRotation = idleRotation(at: now)
         actionRotation = currentRotation
+        spinCarryStarted = nil
+        spinCarryDistance = 0
         let outwardAngle = nearestEquivalent(of: travelAngle, to: currentRotation)
 
         withAnimation(.easeInOut(duration: orientDuration)) {
@@ -354,14 +375,15 @@ struct SpaceLionPlayfield: View {
             }
             beginOutwardTravel(option,
                                 target: target,
-                                pressedDestination: pressedDestination,
+                                contactDestination: contactDestination,
                                 token: token)
         }
     }
 
     private var orientDuration: Double { reduceMotion ? 0.10 : 0.38 }
-    private var outwardDuration: Double { reduceMotion ? 0.20 : 1.16 }
+    private var outwardDuration: Double { reduceMotion ? 0.14 : 0.68 }
     private var pressDuration: Double { reduceMotion ? 0.04 : 0.10 }
+    private var retractFingerDuration: Double { reduceMotion ? 0.06 : 0.20 }
     private var pushOffDuration: Double { reduceMotion ? 0.08 : 0.20 }
     /// Long enough for a weightless arrival: most of the distance is covered
     /// early, and the last stretch only drifts to a stop.
@@ -370,7 +392,7 @@ struct SpaceLionPlayfield: View {
 
     private func beginOutwardTravel(_ option: AnswerOption,
                                      target: CGPoint,
-                                     pressedDestination: CGSize,
+                                     contactDestination: CGSize,
                                      token: Int) {
         motionPhase = .travellingOut
         phaseStarted = Date()
@@ -378,7 +400,7 @@ struct SpaceLionPlayfield: View {
         // A second animation for that last nudge used to cut the glide.
         withAnimation(.timingCurve(0.35, 0.00, 0.55, 1.00,
                                    duration: outwardDuration)) {
-            motionOffset = pressedDestination
+            motionOffset = contactDestination
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + outwardDuration) {
@@ -435,6 +457,25 @@ struct SpaceLionPlayfield: View {
     }
 
     private func beginPushOff(token: Int) {
+        if selectedWasCorrect {
+            motionPhase = .retractingFinger
+            phaseStarted = Date()
+            withAnimation(reduceMotion
+                          ? .easeOut(duration: 0.06)
+                          : .spring(response: 0.22, dampingFraction: 0.58)) {
+                buttonImpactScale = 1
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + retractFingerDuration) {
+                guard actionSequence == token else { return }
+                beginReturnMotion(token: token, celebrates: !reduceMotion)
+            }
+            return
+        }
+
+        beginReturnMotion(token: token, celebrates: false)
+    }
+
+    private func beginReturnMotion(token: Int, celebrates: Bool) {
         motionPhase = .pushingOff
         phaseStarted = Date()
         // One continuous glide home. It leaves with the push and spends the
@@ -444,12 +485,22 @@ struct SpaceLionPlayfield: View {
             ? .linear(duration: pushOffDuration + returnDuration)
             : .timingCurve(0.18, 0.35, 0.36, 1.00,
                            duration: pushOffDuration + returnDuration)
+        // Keep a little angular velocity at the end of the flip. The idle
+        // carry takes over that velocity at the centre, avoiding a hard stop.
+        let spinAnimation: Animation = reduceMotion
+            ? .linear(duration: pushOffDuration + returnDuration)
+            : .timingCurve(0.18, 0.35, 0.80, 0.984,
+                           duration: pushOffDuration + returnDuration)
         let buttonAnimation: Animation = reduceMotion
             ? .easeOut(duration: 0.10)
             : .spring(response: 0.22, dampingFraction: 0.52)
         withAnimation(recoilAnimation) {
             motionOffset = .zero
-            if selectedWasCorrect, !reduceMotion {
+        }
+        if celebrates {
+            withAnimation(spinAnimation) {
+                // Always one full turn, irrespective of which answer column
+                // was touched. The approach rotation is deliberately separate.
                 celebrationSpin += 360
             }
         }
@@ -482,11 +533,24 @@ struct SpaceLionPlayfield: View {
     }
 
     private func beginSettling(token: Int) {
+        let now = Date()
+        // The return glide has reached the exact centre. Transfer its angular
+        // momentum immediately instead of waiting for the settle pose to end.
+        idleRotationOffset = actionRotation - rawIdleRotation(at: now)
+        if selectedWasCorrect, !reduceMotion {
+            spinCarryStarted = now
+            // 20 degrees/second at hand-off (80 / 4), fading for roughly
+            // twelve seconds before the permanent idle sway dominates.
+            spinCarryDistance = 80
+        } else {
+            spinCarryStarted = nil
+            spinCarryDistance = 0
+        }
         motionPhase = .settling
-        phaseStarted = Date()
+        phaseStarted = now
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) {
             guard actionSequence == token else { return }
-            finishAction()
+            finishAction(preservingSpinCarry: true)
         }
     }
 
@@ -506,12 +570,25 @@ struct SpaceLionPlayfield: View {
     }
 
     private func idleRotation(at date: Date) -> Double {
-        rawIdleRotation(at: date) + idleRotationOffset
+        rawIdleRotation(at: date) + idleRotationOffset + spinCarryRotation(at: date)
     }
 
-    private func finishAction() {
+    /// Integrates a small, exponentially fading angular velocity. The carry
+    /// itself approaches a finite angle, while `rawIdleRotation` keeps the
+    /// astronaut gently moving forever after that momentum has faded.
+    private func spinCarryRotation(at date: Date) -> Double {
+        guard let spinCarryStarted, spinCarryDistance > 0 else { return 0 }
+        let elapsed = max(0, date.timeIntervalSince(spinCarryStarted))
+        return spinCarryDistance * (1 - exp(-elapsed / 4.0))
+    }
+
+    private func finishAction(preservingSpinCarry: Bool = false) {
         let now = Date()
-        idleRotationOffset = actionRotation - rawIdleRotation(at: now)
+        if !preservingSpinCarry {
+            idleRotationOffset = actionRotation - rawIdleRotation(at: now)
+            spinCarryStarted = nil
+            spinCarryDistance = 0
+        }
         motionPhase = .idle
         phaseStarted = now
         selectedOptionID = nil
@@ -547,6 +624,8 @@ struct SpaceLionPlayfield: View {
         lionScale = reduceMotion ? 1 : 0.68
         lionOpacity = 0
         celebrationSpin = 0
+        spinCarryStarted = nil
+        spinCarryDistance = 0
         withAnimation(.spring(response: reduceMotion ? 0.18 : 0.58,
                               dampingFraction: 0.72)) {
             lionScale = 1
@@ -715,9 +794,11 @@ extension SpaceLionPlayfield {
         }
 
         var lionSize: CGFloat {
+            // 135% of the original rig: ten percent smaller than the previous
+            // 150% treatment while remaining the focus of the cockpit.
             min(size.width * 0.23,
                 size.height * (isPad ? 0.35 : 0.38),
-                cockpit.windowRect.height * 0.74)
+                cockpit.windowRect.height * 0.74) * 1.35
         }
     }
 }
@@ -743,6 +824,7 @@ private struct CockpitLayout {
 private struct SpaceConsoleButton: View {
     let text: String
     let size: CGFloat
+    let accentColor: Color
     let feedback: HoopFeedback
     let isPressed: Bool
     @State private var shakePhase: CGFloat = 0
@@ -860,10 +942,10 @@ private struct SpaceConsoleButton: View {
                                              endRadius: size * 0.035))
                         .frame(width: size * 0.07, height: size * 0.07)
                     Capsule()
-                        .fill(Color(red: 1.00, green: 0.57, blue: 0.08))
+                        .fill(accentColor)
                         .frame(width: size * 0.11, height: size * 0.025)
                         .offset(x: -x * size * 0.075)
-                        .shadow(color: Color(red: 1.00, green: 0.45, blue: 0.04),
+                        .shadow(color: accentColor.opacity(0.90),
                                 radius: size * 0.025)
                 }
                 .offset(x: x * size * 0.35, y: y * size * 0.35)
@@ -1163,7 +1245,7 @@ private struct SpaceshipCockpit: View {
 
     private let cyan = Color(red: 0.20, green: 0.82, blue: 1.00)
     private let blue = Color(red: 0.08, green: 0.34, blue: 0.95)
-    private let orange = Color(red: 1.00, green: 0.62, blue: 0.12)
+    private var orange: Color { character.color }
     private let metalLight = Color(red: 0.55, green: 0.64, blue: 0.82)
     private let metal = Color(red: 0.16, green: 0.22, blue: 0.38)
     private let metalDark = Color(red: 0.035, green: 0.05, blue: 0.11)
@@ -1207,6 +1289,21 @@ private struct SpaceshipCockpit: View {
     /// projection or the cockpit stops reading as one coherent 3D box.
     private var sideWallFrontSpread: CGFloat { isPad ? 1.34 : 1.40 }
 
+    /// Projects a horizontal line on the rear wall to the visible edge of a
+    /// side wall. Both the ceiling and floor use this, so their joints meet
+    /// the wall panels at the exact same perspective angle.
+    private func sideWallCanvasY(backY: CGFloat,
+                                 innerX: CGFloat,
+                                 outerX: CGFloat,
+                                 canvasX: CGFloat) -> CGFloat {
+        let vanishingY = layout.windowRect.midY
+        let nearY = vanishingY + (backY - vanishingY) * sideWallFrontSpread
+        let run = innerX - outerX
+        guard abs(run) > 0.5 else { return backY }
+        let progress = (canvasX - outerX) / run
+        return nearY + (backY - nearY) * progress
+    }
+
     private func drawStatic(in context: GraphicsContext, size: CGSize) {
         let window = layout.windowRect
         let cut = min(window.width, window.height) * 0.11
@@ -1216,16 +1313,19 @@ private struct SpaceshipCockpit: View {
                      with: .linearGradient(Gradient(colors: [metal, metalDark, .black]),
                                            startPoint: .zero,
                                            endPoint: CGPoint(x: 0, y: size.height)))
-        drawRoof(in: context, size: size, window: window)
-        drawSpace(in: context, window: window, cut: cut, time: 0)
-        drawWindowFrame(in: context, window: window, cut: cut)
-        drawSill(in: context, window: window, floorTop: floorTop)
         drawColumn(in: context, size: size,
                    minX: -2, maxX: layout.leftEdge, innerIsTrailing: true,
                    window: window)
         drawColumn(in: context, size: size,
                    minX: layout.rightEdge, maxX: size.width + 2, innerIsTrailing: false,
                    window: window)
+        // The ceiling is the upper foreground plane. It masks the near ends
+        // of both side walls along the same perspective projection that the
+        // floor uses below, rather than letting the wall panels reach the top.
+        drawRoof(in: context, size: size, window: window)
+        drawSpace(in: context, window: window, cut: cut, time: 0)
+        drawWindowFrame(in: context, window: window, cut: cut)
+        drawSill(in: context, window: window, floorTop: floorTop)
         // The deck is the foreground plane of the box. Drawing it last makes
         // it continue over both side walls at exactly the same horizon as the
         // screen sill and the bottom of the answer racks.
@@ -1507,26 +1607,68 @@ private struct SpaceshipCockpit: View {
     private func drawRoof(in context: GraphicsContext, size: CGSize, window: CGRect) {
         let bottom = window.minY - frameWidth * 0.5
         guard bottom > 0 else { return }
-        context.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: bottom)),
+        let leftControlX = layout.buttonPoints.first?.x ?? layout.leftEdge
+        let rightControlX = layout.buttonPoints
+            .dropFirst(GameConfig.answerColumnCount).first?.x ?? layout.rightEdge
+        let leftJoin = leftControlX - layout.buttonSize * 0.58
+        let rightJoin = rightControlX + layout.buttonSize * 0.58
+        let leftOuterBottom = max(0,
+                                  sideWallCanvasY(backY: bottom,
+                                                  innerX: leftJoin,
+                                                  outerX: -2,
+                                                  canvasX: 0))
+        let rightOuterBottom = max(0,
+                                   sideWallCanvasY(backY: bottom,
+                                                   innerX: rightJoin,
+                                                   outerX: size.width + 2,
+                                                   canvasX: size.width))
+
+        // Mirror of the deck polygon: the rear edge stays level above the
+        // windscreen and controls, while both near edges climb toward the top
+        // corners. This is the ceiling/wall joint of the cockpit box.
+        var ceilingShape = Path()
+        ceilingShape.move(to: CGPoint(x: 0, y: leftOuterBottom))
+        ceilingShape.addLine(to: CGPoint(x: leftJoin, y: bottom))
+        ceilingShape.addLine(to: CGPoint(x: rightJoin, y: bottom))
+        ceilingShape.addLine(to: CGPoint(x: size.width, y: rightOuterBottom))
+        ceilingShape.addLine(to: CGPoint(x: size.width, y: 0))
+        ceilingShape.addLine(to: .zero)
+        ceilingShape.closeSubpath()
+
+        var ceiling = context
+        ceiling.clip(to: ceilingShape)
+        ceiling.fill(ceilingShape,
                      with: .linearGradient(Gradient(colors: [metalDark, metal, metalLight]),
                                            startPoint: .zero,
                                            endPoint: CGPoint(x: 0, y: bottom)))
         for fraction in [0.34, 0.68] as [CGFloat] {
-            seam(context,
+            seam(ceiling,
                  from: CGPoint(x: 0, y: bottom * fraction),
                  to: CGPoint(x: size.width, y: bottom * fraction))
         }
         for fraction in stride(from: CGFloat(0.2), through: 0.8, by: 0.2) {
-            seam(context,
+            seam(ceiling,
                  from: CGPoint(x: size.width * fraction, y: bottom * 0.68),
                  to: CGPoint(x: size.width * fraction, y: bottom))
         }
-        drawVent(context,
+        drawVent(ceiling,
                  rect: CGRect(x: size.width * 0.06, y: bottom * 0.18,
                               width: size.width * 0.08, height: bottom * 0.42))
-        drawVent(context,
+        drawVent(ceiling,
                  rect: CGRect(x: size.width * 0.86, y: bottom * 0.18,
                               width: size.width * 0.08, height: bottom * 0.42))
+
+        var ceilingJoint = Path()
+        ceilingJoint.move(to: CGPoint(x: 0, y: leftOuterBottom))
+        ceilingJoint.addLine(to: CGPoint(x: leftJoin, y: bottom))
+        ceilingJoint.addLine(to: CGPoint(x: rightJoin, y: bottom))
+        ceilingJoint.addLine(to: CGPoint(x: size.width, y: rightOuterBottom))
+        context.stroke(ceilingJoint, with: .color(.black.opacity(0.92)),
+                       lineWidth: isPad ? 10 : 7)
+        context.stroke(ceilingJoint, with: .color(metalLight.opacity(0.62)),
+                       lineWidth: isPad ? 4 : 2.8)
+        context.stroke(ceilingJoint, with: .color(cyan.opacity(0.30)),
+                       lineWidth: isPad ? 1.5 : 1)
     }
 
     private func drawVent(_ context: GraphicsContext, rect: CGRect) {
@@ -1568,7 +1710,9 @@ private struct SpaceshipCockpit: View {
         let innerModuleX = controlX + towardInner * buttonSize * 0.58
         let vanishingY = window.midY
         let frontSpread = sideWallFrontSpread
+        let wallTop = window.minY - frameWidth * 0.5
         let wallBottom = layout.floorTop
+        let wallHeight = max(1, wallBottom - wallTop)
 
         func frontY(for backY: CGFloat) -> CGFloat {
             vanishingY + (backY - vanishingY) * frontSpread
@@ -1585,8 +1729,8 @@ private struct SpaceshipCockpit: View {
         // One closed side wall. It reaches beyond the canvas at the near edge
         // so no strip of the star field can read as an accidental side window.
         var sideWall = Path()
-        sideWall.move(to: wallPoint(backY: 0, depth: 0))
-        sideWall.addLine(to: wallPoint(backY: 0, depth: 1))
+        sideWall.move(to: wallPoint(backY: wallTop, depth: 0))
+        sideWall.addLine(to: wallPoint(backY: wallTop, depth: 1))
         sideWall.addLine(to: wallPoint(backY: wallBottom, depth: 1))
         sideWall.addLine(to: wallPoint(backY: wallBottom, depth: 0))
         sideWall.closeSubpath()
@@ -1606,8 +1750,8 @@ private struct SpaceshipCockpit: View {
         // depth lines, not vertical cage bars.
         let facetStops: [CGFloat] = [0, 0.235, 0.50, 0.765, 1]
         for index in 0..<(facetStops.count - 1) {
-            let backTop = wallBottom * facetStops[index]
-            let backBottom = wallBottom * facetStops[index + 1]
+            let backTop = wallTop + wallHeight * facetStops[index]
+            let backBottom = wallTop + wallHeight * facetStops[index + 1]
             var facet = Path()
             facet.move(to: wallPoint(backY: backTop, depth: 0))
             facet.addLine(to: wallPoint(backY: backTop, depth: 1))
@@ -1649,8 +1793,8 @@ private struct SpaceshipCockpit: View {
                                                 (0.855, 1.015)]
         let lift = min(buttonSize * 0.075, isPad ? 12 : 8)
         for (index, band) in plateBands.enumerated() {
-            let backTop = wallBottom * band.0
-            let backBottom = wallBottom * band.1
+            let backTop = wallTop + wallHeight * band.0
+            let backBottom = wallTop + wallHeight * band.1
             let nearDepth: CGFloat = 0.08
             let farDepth: CGFloat = 0.70
 
@@ -1914,28 +2058,27 @@ private struct SpaceshipCockpit: View {
         let leftJoin = leftControlX - layout.buttonSize * 0.58
         let rightJoin = rightControlX + layout.buttonSize * 0.58
         // Continue the exact perspective projection used by `drawColumn`.
-        // This makes the lower wall/floor joint the next depth line of the
-        // side wall instead of an independently angled decorative diagonal.
-        let vanishingY = layout.windowRect.midY
-        let projectedOuterTop = vanishingY + (top - vanishingY) * sideWallFrontSpread
-
-        // The side wall itself starts just outside the canvas (x = -2 / +2).
-        // Calculate the visible intersection at x = 0 / width so the joint is
-        // pixel-for-pixel collinear with the wall geometry above it.
-        let wallOverscan: CGFloat = 2
-        let projectionRun = max(1, leftJoin + wallOverscan)
-        let canvasEdgeProgress = wallOverscan / projectionRun
-        let outerTop = min(bottom,
-                           projectedOuterTop + (top - projectedOuterTop) * canvasEdgeProgress)
+        // Each edge is calculated separately so asymmetric safe-area layouts
+        // still meet both side walls pixel-for-pixel.
+        let leftOuterTop = min(bottom,
+                               sideWallCanvasY(backY: top,
+                                               innerX: leftJoin,
+                                               outerX: -2,
+                                               canvasX: 0))
+        let rightOuterTop = min(bottom,
+                                sideWallCanvasY(backY: top,
+                                                innerX: rightJoin,
+                                                outerX: size.width + 2,
+                                                canvasX: size.width))
 
         // The back edge stays level beneath the controls and windscreen. At
         // both sides it advances toward the viewer, producing the two diagonal
         // wall/floor joints that make this a room rather than a flat stripe.
         var floorShape = Path()
-        floorShape.move(to: CGPoint(x: 0, y: outerTop))
+        floorShape.move(to: CGPoint(x: 0, y: leftOuterTop))
         floorShape.addLine(to: CGPoint(x: leftJoin, y: top))
         floorShape.addLine(to: CGPoint(x: rightJoin, y: top))
-        floorShape.addLine(to: CGPoint(x: size.width, y: outerTop))
+        floorShape.addLine(to: CGPoint(x: size.width, y: rightOuterTop))
         floorShape.addLine(to: CGPoint(x: size.width, y: bottom))
         floorShape.addLine(to: CGPoint(x: 0, y: bottom))
         floorShape.closeSubpath()
@@ -2052,10 +2195,10 @@ private struct SpaceshipCockpit: View {
         drawPlatform(in: deck, size: size, floorDepth: depth, time: time)
 
         var floorJoint = Path()
-        floorJoint.move(to: CGPoint(x: 0, y: outerTop))
+        floorJoint.move(to: CGPoint(x: 0, y: leftOuterTop))
         floorJoint.addLine(to: CGPoint(x: leftJoin, y: top))
         floorJoint.addLine(to: CGPoint(x: rightJoin, y: top))
-        floorJoint.addLine(to: CGPoint(x: size.width, y: outerTop))
+        floorJoint.addLine(to: CGPoint(x: size.width, y: rightOuterTop))
         context.stroke(floorJoint, with: .color(.black.opacity(0.92)),
                        lineWidth: isPad ? 10 : 7)
         context.stroke(floorJoint, with: .color(metalLight.opacity(0.62)),

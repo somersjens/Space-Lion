@@ -11,16 +11,16 @@ import SwiftUI
 
 /// The single currency collected throughout the game.
 enum Currency {
-    static let iconName = "hoop_currency"
+    static let iconName = "star.fill"
 }
 
-/// The hoop artwork used anywhere a currency count is shown.
+/// The star used anywhere a currency count is shown.
 struct CurrencyIcon: View {
     let size: CGFloat
 
     var body: some View {
-        Image(Currency.iconName)
-            .renderingMode(.template)
+        Image(systemName: Currency.iconName)
+            .symbolRenderingMode(.monochrome)
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)

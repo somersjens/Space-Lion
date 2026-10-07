@@ -257,10 +257,6 @@ struct GameView: View {
                     .padding(.trailing, hudInsets.trailing)
                     .padding(.top, hudTop(below: topInset))
                     .opacity(showsGameplayHUD ? 1 : 0)
-                    .scaleEffect(showsGameplayHUD ? 1 : 0.92, anchor: .topLeading)
-                    .offset(x: showsGameplayHUD ? 0 : -12)
-                    .animation(.spring(response: 0.34, dampingFraction: 0.82),
-                               value: showsGameplayHUD)
                     .allowsHitTesting(showsGameplayHUD)
 
                 if model.comboAnnouncementID > 0 {
@@ -590,10 +586,15 @@ struct GameView: View {
     }
 
     private var hudCyan: Color { Color(red: 0.00, green: 0.75, blue: 1.00) }
-    private var hudOrange: Color { Color(red: 1.00, green: 0.52, blue: 0.07) }
+    /// The secondary cockpit light follows the selected character. For the
+    /// lion this is the same warm yellow used by its suit and portrait.
+    private var hudOrange: Color { character.color }
 
     private var showsGameplayHUD: Bool {
-        !showsIntro && !playsFishEntrance && !playsLevelCompletion
+        // The HUD belongs to the level reveal, not to the end of the character
+        // entrance. Keeping it visible during that entrance prevents the
+        // cockpit from appearing first and its instruments popping in later.
+        !showsIntro && !playsLevelCompletion
     }
 
     /// The reef only ticks while the level is actually being played: never

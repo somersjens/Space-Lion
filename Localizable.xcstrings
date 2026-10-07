@@ -12245,7 +12245,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You collected all the hoops"
+            "value" : "You collected all the stars"
           }
         },
         "es" : {
@@ -12461,7 +12461,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Je hebt alle hoepels verzameld"
+            "value" : "Je hebt alle sterren verzameld"
           }
         },
         "or" : {
@@ -44469,7 +44469,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Earn a few more hoops to unlock %@! 🐼"
+            "value" : "Earn a few more stars to unlock %@! 🐼"
           }
         },
         "es" : {
@@ -44685,7 +44685,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@: Verdien nog een paar hoepels om dit dier vrij te spelen! 🐼"
+            "value" : "%@: Verdien nog een paar sterren om dit dier vrij te spelen! 🐼"
           }
         },
         "or" : {
@@ -45131,13 +45131,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Only %lld hoop to go! ⭕"
+                  "value" : "Only %lld star to go! ⭐"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Only %lld hoops to go! ⭕"
+                  "value" : "Only %lld stars to go! ⭐"
                 }
               }
             }
@@ -45779,13 +45779,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Nog maar %lld hoepel te gaan! ⭕"
+                  "value" : "Nog maar %lld ster te gaan! ⭐"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Nog maar %lld hoepels te gaan! ⭕"
+                  "value" : "Nog maar %lld sterren te gaan! ⭐"
                 }
               }
             }
@@ -47913,13 +47913,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld hoop collected! ⭕"
+                  "value" : "%lld star collected! ⭐"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld hoops collected! ⭕"
+                  "value" : "%lld stars collected! ⭐"
                 }
               }
             }
@@ -48561,13 +48561,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld hoepel verzameld! ⭕"
+                  "value" : "%lld ster verzameld! ⭐"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld hoepels verzameld! ⭕"
+                  "value" : "%lld sterren verzameld! ⭐"
                 }
               }
             }
@@ -49109,7 +49109,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your animals are waiting. Jump back in and keep collecting hoops!"
+            "value" : "Your animals are waiting. Jump back in and keep collecting stars!"
           }
         },
         "es" : {
@@ -49325,7 +49325,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Je dieren wachten op je. Spring weer verder en verzamel meer hoepels!"
+            "value" : "Je dieren wachten op je. Spring weer verder en verzamel meer sterren!"
           }
         },
         "or" : {
@@ -52836,7 +52836,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "It’s been %lld days. Let’s solve some sums and earn more hoops!"
+            "value" : "It’s been %lld days. Let’s solve some sums and earn more stars!"
           }
         },
         "es" : {
@@ -53052,7 +53052,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Het is %lld dagen geleden. Tijd voor wat sommen en nieuwe hoepels!"
+            "value" : "Het is %lld dagen geleden. Tijd voor wat sommen en nieuwe sterren!"
           }
         },
         "or" : {
@@ -56747,13 +56747,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "You have %lld hoop in total. Ready for a few more?"
+                  "value" : "You have %lld star in total. Ready for a few more?"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "You have %lld hoops in total. Ready for a few more?"
+                  "value" : "You have %lld stars in total. Ready for a few more?"
                 }
               }
             }
@@ -57395,13 +57395,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Je hebt in totaal %lld hoepel. Klaar voor nog een paar?"
+                  "value" : "Je hebt in totaal %lld ster. Klaar voor nog een paar?"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Je hebt in totaal %lld hoepels. Klaar voor nog een paar?"
+                  "value" : "Je hebt in totaal %lld sterren. Klaar voor nog een paar?"
                 }
               }
             }
@@ -58138,13 +58138,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld hoop this week! 🎉"
+                  "value" : "%lld star this week! 🎉"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld hoops this week! 🎉"
+                  "value" : "%lld stars this week! 🎉"
                 }
               }
             }
@@ -58786,13 +58786,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld hoepel deze week! 🎉"
+                  "value" : "%lld ster deze week! 🎉"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld hoepels deze week! 🎉"
+                  "value" : "%lld sterren deze week! 🎉"
                 }
               }
             }
@@ -73795,7 +73795,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Available from %lld hoops"
+            "value" : "Available from %lld stars"
           }
         },
         "es" : {
@@ -74011,7 +74011,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Beschikbaar vanaf %lld hoepels"
+            "value" : "Beschikbaar vanaf %lld sterren"
           }
         },
         "or" : {
@@ -75197,7 +75197,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You’ve earned %lld hoops"
+            "value" : "You’ve earned %lld stars"
           }
         },
         "es" : {
@@ -75413,7 +75413,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Je hebt %lld hoepels verdiend"
+            "value" : "Je hebt %lld sterren verdiend"
           }
         },
         "or" : {

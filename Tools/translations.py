@@ -198,7 +198,7 @@ def build(pairs, kind, names, english_localization):
 CONTEXTS = [
     (r"^character\.",
      "An animal's name. Appears on its own under the artwork and inside "
-     "sentences such as \"3 more hoops to unlock …\".", 14),
+     "sentences such as \"3 more stars to unlock …\".", 14),
     (r"^common\.",
      "A button label, reused across the app.", 14),
     (r"^game\.combo",

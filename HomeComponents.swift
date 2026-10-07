@@ -689,7 +689,7 @@ struct LevelCardView: View {
                            delay: Self.scoreCountDelay,
                            duration: Self.scoreCountDuration)
                 .font(.system(size: 13 * cardScale, weight: .bold))
-            LevelCardRingIcon(size: 15 * cardScale)
+            LevelCardCurrencyIcon(size: 15 * cardScale)
                 // The launch anchor is read from the unscaled layout frame, so
                 // the flying card starts exactly overlapping this glyph.
                 .background {
@@ -805,7 +805,7 @@ struct LevelCardView: View {
                                    delay: Self.scoreCountDelay,
                                    duration: Self.scoreCountDuration)
                         .font(.system(size: 13 * cardScale, weight: .bold))
-                    LevelCardRingIcon(size: 15 * cardScale)
+                    LevelCardCurrencyIcon(size: 15 * cardScale)
                         // Once the max card has been revealed, the flight must
                         // still start on this exact bubble. Without an anchor
                         // here the standard card's disappearing glyph leaves
@@ -1013,19 +1013,15 @@ private struct CompletionRings: View {
     }
 }
 
-/// The original score-hoop artwork, inset slightly inside its layout frame so
-/// its organic top and bottom keep a little breathing room at compact sizes.
-private struct LevelCardRingIcon: View {
+/// The currency star, inset slightly inside its layout frame so it keeps a
+/// little breathing room at compact sizes.
+private struct LevelCardCurrencyIcon: View {
     let size: CGFloat
 
     var body: some View {
-        Image(Currency.iconName)
-            .renderingMode(.template)
-            .resizable()
-            .scaledToFit()
+        CurrencyIcon(size: size * 0.88)
             .frame(width: size * 0.88, height: size * 0.88)
             .frame(width: size, height: size)
-            .accessibilityHidden(true)
     }
 }
 
