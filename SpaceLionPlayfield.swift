@@ -743,8 +743,15 @@ extension SpaceLionPlayfield {
         /// deliberately on one vertical axis: perspective belongs to the room
         /// around the controls, never to the control alignment itself.
         var answerPoints: [CGPoint] {
+            // Keep the first row exactly where it was. The fixed mounting
+            // flange painted behind each interactive module is 112% of the
+            // button size, so that complete visible housing—not merely the
+            // tappable face—defines the pitch. Adjacent housings now meet at
+            // one clean seam without either one hanging over the next.
+            let firstRowY = columnTop + slotHeight * 0.5
+            let housingPitch = answerSize * 1.12
             let rows = (0..<GameConfig.answerColumnCount).map {
-                columnTop + slotHeight * (CGFloat($0) + 0.5)
+                firstRowY + housingPitch * CGFloat($0)
             }
             return rows.map { CGPoint(x: leftX, y: $0) }
                 + rows.map { CGPoint(x: rightX, y: $0) }
@@ -754,13 +761,16 @@ extension SpaceLionPlayfield {
             let leftEdge = leftX + answerSize / 2 + columnPadding
             let rightEdge = rightX - answerSize / 2 - columnPadding
             let gap: CGFloat = isPad ? 36 : 22
-            let top = topReserve + (isPad ? 16 : 10)
+            // Leave the 3D lower lip and shadow of the HUD fully in front of
+            // the room. Aligning their nominal frames put this joint behind
+            // those effects even though the geometry itself did not overlap.
+            let top = topReserve
             let rows = answerPoints.prefix(GameConfig.answerColumnCount)
             let lastAnswerY = rows.last?.y ?? columnBottom
             // One shared horizon for the whole room. The answer rack, the
             // screen sill and the side walls all meet the floor here.
             let floorTop = min(size.height - max(bottomReserve, isPad ? 16 : 8),
-                               lastAnswerY + answerSize * 0.60)
+                               lastAnswerY + answerSize * 0.64)
             let frameWidth: CGFloat = isPad ? 26 : 18
             let sillDepth: CGFloat = isPad ? 14 : 9
             // Let the outside view continue down until only the physical lower
@@ -1284,6 +1294,10 @@ private struct SpaceshipCockpit: View {
     }
 
     private var frameWidth: CGFloat { isPad ? 26 : 18 }
+    /// Only the near side of the foreground platform enters the screen. This
+    /// keeps its complete upper arc visible while preserving a strip of deck
+    /// between that arc and the newly lowered floor joint.
+    private var platformVisibleFraction: CGFloat { 0.40 }
     /// How strongly the near edge of each side wall opens toward the viewer.
     /// The wall panels and the wall/floor joint must use this exact same
     /// projection or the cockpit stops reading as one coherent 3D box.
@@ -2211,7 +2225,7 @@ private struct SpaceshipCockpit: View {
         let width = min(size.width * 0.40, layout.windowRect.width * 0.62)
         let height = min(width * 0.30, floorDepth * 1.5)
         let pad = CGRect(x: size.width / 2 - width / 2,
-                         y: size.height - height * 0.76,
+                         y: size.height - height * platformVisibleFraction,
                          width: width,
                          height: height)
         let centre = CGPoint(x: pad.midX, y: pad.midY)
@@ -2641,7 +2655,7 @@ private struct SpaceshipCockpit: View {
         let width = min(size.width * 0.40, layout.windowRect.width * 0.62)
         let height = min(width * 0.30, floorDepth * 1.5)
         let pad = CGRect(x: size.width / 2 - width / 2,
-                         y: size.height - height * 0.76,
+                         y: size.height - height * platformVisibleFraction,
                          width: width,
                          height: height)
         let ring = pad.insetBy(dx: width * 0.13, dy: height * 0.13)
