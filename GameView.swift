@@ -397,7 +397,7 @@ struct GameView: View {
             HStack(spacing: isPad ? 8 : 5) {
                 // This is a decorative sweep around a once-per-second value;
                 // it does not need a separate 30 fps display link.
-                TimelineView(.animation(minimumInterval: 1.0 / 12.0,
+                TimelineView(.animation(minimumInterval: 1.0 / 8.0,
                                         paused: !isReefRunning || reduceMotion)) { timeline in
                     let spin = timeline.date.timeIntervalSinceReferenceDate * 70
                     ZStack {
@@ -722,43 +722,25 @@ private struct CockpitPressStyle: ButtonStyle {
     }
 }
 
-/// A restrained status rail for the HUD: one long highlight crosses the panel
-/// slowly, like power moving through a ship console. It freezes cleanly when
-/// the game is paused or Reduce Motion is enabled.
+/// A restrained status rail for the HUD. This used to give every HUD panel its
+/// own animation clock. A fixed highlight has the same illuminated read at
+/// this scale without three extra main-thread updates ten times per second.
 private struct CockpitPanelEnergyRail: View {
     let color: Color
     let isRunning: Bool
 
     var body: some View {
-        GeometryReader { proxy in
-            TimelineView(.animation(minimumInterval: 1.0 / 10.0,
-                                    paused: !isRunning)) { timeline in
-                let duration = 5.8
-                let elapsed = timeline.date.timeIntervalSinceReferenceDate
-                let phase = isRunning
-                    ? elapsed.truncatingRemainder(dividingBy: duration) / duration
-                    : 0.42
-                let segmentWidth = max(10, proxy.size.width * 0.38)
-                let travel = proxy.size.width + segmentWidth * 2
-                let x = -segmentWidth + travel * phase
-
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(color.opacity(0.20))
-
-                    Capsule()
-                        .fill(LinearGradient(
-                            colors: [color.opacity(0), color, .white, color, color.opacity(0)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ))
-                        .frame(width: segmentWidth)
-                        .offset(x: x)
-                        .shadow(color: color.opacity(0.72), radius: 4)
-                }
-                .clipShape(Capsule())
-            }
-        }
+        Capsule()
+            .fill(LinearGradient(
+                colors: [color.opacity(0.12),
+                         color.opacity(0.55),
+                         .white.opacity(0.88),
+                         color.opacity(0.55),
+                         color.opacity(0.12)],
+                startPoint: .leading,
+                endPoint: .trailing
+            ))
+            .opacity(isRunning ? 1 : 0.65)
         .accessibilityHidden(true)
     }
 }

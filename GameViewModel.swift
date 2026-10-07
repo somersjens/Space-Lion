@@ -520,8 +520,11 @@ final class GameViewModel: ObservableObject {
               engine.state != .intro, engine.state != .gameOver,
               clockStoredSeconds > 0 else { return }
         clockDeadline = Date().addingTimeInterval(clockStoredSeconds)
-        clockSubscription = Timer.publish(every: 0.25,
-                                          tolerance: 0.04,
+        // The display only publishes whole seconds. Sampling twice per second
+        // keeps the deadline accurate while halving otherwise invisible main-
+        // thread wakeups during every active game.
+        clockSubscription = Timer.publish(every: 0.5,
+                                          tolerance: 0.08,
                                           on: .main,
                                           in: .common)
             .autoconnect()
