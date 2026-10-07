@@ -676,12 +676,24 @@ extension SpaceLionPlayfield {
             let rightEdge = rightX - answerSize / 2 - columnPadding
             let gap: CGFloat = isPad ? 36 : 22
             let top = topReserve + (isPad ? 16 : 10)
-            let bottom = max(top + 60, size.height * (isPad ? 0.72 : 0.73))
+            let rows = answerPoints.prefix(GameConfig.answerColumnCount)
+            let lastAnswerY = rows.last?.y ?? columnBottom
+            // One shared horizon for the whole room. The answer rack, the
+            // screen sill and the side walls all meet the floor here.
+            let floorTop = min(size.height - max(bottomReserve, isPad ? 16 : 8),
+                               lastAnswerY + answerSize * 0.60)
+            let frameWidth: CGFloat = isPad ? 26 : 18
+            let sillDepth: CGFloat = isPad ? 14 : 9
+            // Let the outside view continue down until only the physical lower
+            // frame and its shallow sill remain above the shared floor line.
+            let bottom = max(top + 60,
+                             floorTop - frameWidth * 0.5 - sillDepth)
             return CockpitLayout(
                 windowRect: CGRect(x: leftEdge + gap,
                                    y: top,
                                    width: max(60, rightEdge - leftEdge - gap * 2),
                                    height: bottom - top),
+                floorTop: floorTop,
                 leftEdge: leftEdge,
                 rightEdge: rightEdge,
                 buttonPoints: answerPoints,
@@ -719,6 +731,7 @@ private func cockpitWrap(_ value: Double) -> Double {
 /// exactly with the interactive buttons laid over them.
 private struct CockpitLayout {
     let windowRect: CGRect
+    let floorTop: CGFloat
     let leftEdge: CGFloat
     let rightEdge: CGFloat
     let buttonPoints: [CGPoint]
@@ -1189,18 +1202,21 @@ private struct SpaceshipCockpit: View {
     }
 
     private var frameWidth: CGFloat { isPad ? 26 : 18 }
+    /// How strongly the near edge of each side wall opens toward the viewer.
+    /// The wall panels and the wall/floor joint must use this exact same
+    /// projection or the cockpit stops reading as one coherent 3D box.
+    private var sideWallFrontSpread: CGFloat { isPad ? 1.34 : 1.40 }
 
     private func drawStatic(in context: GraphicsContext, size: CGSize) {
         let window = layout.windowRect
         let cut = min(window.width, window.height) * 0.11
-        let floorTop = window.maxY + frameWidth * 0.5 + (isPad ? 14 : 9)
+        let floorTop = layout.floorTop
 
         context.fill(Path(CGRect(origin: .zero, size: size)),
                      with: .linearGradient(Gradient(colors: [metal, metalDark, .black]),
                                            startPoint: .zero,
                                            endPoint: CGPoint(x: 0, y: size.height)))
         drawRoof(in: context, size: size, window: window)
-        drawFloor(in: context, size: size, top: floorTop, time: 0)
         drawSpace(in: context, window: window, cut: cut, time: 0)
         drawWindowFrame(in: context, window: window, cut: cut)
         drawSill(in: context, window: window, floorTop: floorTop)
@@ -1210,6 +1226,10 @@ private struct SpaceshipCockpit: View {
         drawColumn(in: context, size: size,
                    minX: layout.rightEdge, maxX: size.width + 2, innerIsTrailing: false,
                    window: window)
+        // The deck is the foreground plane of the box. Drawing it last makes
+        // it continue over both side walls at exactly the same horizon as the
+        // screen sill and the bottom of the answer racks.
+        drawFloor(in: context, size: size, top: floorTop, time: 0)
     }
 
     private func drawAnimated(in context: GraphicsContext, size: CGSize, time: TimeInterval) {
@@ -1537,7 +1557,7 @@ private struct SpaceshipCockpit: View {
         let buttonSize = layout.buttonSize
         let mounts = layout.buttonPoints.enumerated().filter { $0.element.x > minX && $0.element.x < maxX }
         let points = mounts.map(\.element)
-        guard let first = points.first, let last = points.last else { return }
+        guard let first = points.first else { return }
 
         // The answer rack is part of the rear wall and therefore stays truly
         // vertical. The room depth lives outside it: lines on the side wall
@@ -1547,7 +1567,8 @@ private struct SpaceshipCockpit: View {
         let outerModuleX = controlX + outward * buttonSize * 0.58
         let innerModuleX = controlX + towardInner * buttonSize * 0.58
         let vanishingY = window.midY
-        let frontSpread: CGFloat = isPad ? 1.34 : 1.40
+        let frontSpread = sideWallFrontSpread
+        let wallBottom = layout.floorTop
 
         func frontY(for backY: CGFloat) -> CGFloat {
             vanishingY + (backY - vanishingY) * frontSpread
@@ -1566,8 +1587,8 @@ private struct SpaceshipCockpit: View {
         var sideWall = Path()
         sideWall.move(to: wallPoint(backY: 0, depth: 0))
         sideWall.addLine(to: wallPoint(backY: 0, depth: 1))
-        sideWall.addLine(to: wallPoint(backY: size.height, depth: 1))
-        sideWall.addLine(to: wallPoint(backY: size.height, depth: 0))
+        sideWall.addLine(to: wallPoint(backY: wallBottom, depth: 1))
+        sideWall.addLine(to: wallPoint(backY: wallBottom, depth: 0))
         sideWall.closeSubpath()
         context.fill(sideWall,
                      with: .linearGradient(
@@ -1585,8 +1606,8 @@ private struct SpaceshipCockpit: View {
         // depth lines, not vertical cage bars.
         let facetStops: [CGFloat] = [0, 0.235, 0.50, 0.765, 1]
         for index in 0..<(facetStops.count - 1) {
-            let backTop = size.height * facetStops[index]
-            let backBottom = size.height * facetStops[index + 1]
+            let backTop = wallBottom * facetStops[index]
+            let backBottom = wallBottom * facetStops[index + 1]
             var facet = Path()
             facet.move(to: wallPoint(backY: backTop, depth: 0))
             facet.addLine(to: wallPoint(backY: backTop, depth: 1))
@@ -1628,8 +1649,8 @@ private struct SpaceshipCockpit: View {
                                                 (0.855, 1.015)]
         let lift = min(buttonSize * 0.075, isPad ? 12 : 8)
         for (index, band) in plateBands.enumerated() {
-            let backTop = size.height * band.0
-            let backBottom = size.height * band.1
+            let backTop = wallBottom * band.0
+            let backBottom = wallBottom * band.1
             let nearDepth: CGFloat = 0.08
             let farDepth: CGFloat = 0.70
 
@@ -1691,7 +1712,7 @@ private struct SpaceshipCockpit: View {
         // ends just beyond the first and last module instead of becoming a
         // floor-to-ceiling bar.
         let bankTop = max(0, first.y - buttonSize * 0.60)
-        let bankBottom = min(size.height, last.y + buttonSize * 0.60)
+        let bankBottom = wallBottom
         let bayMinX = min(outerModuleX, innerX)
         let bayMaxX = max(outerModuleX, innerX)
         let bayRect = CGRect(x: bayMinX,
@@ -1887,14 +1908,48 @@ private struct SpaceshipCockpit: View {
         let bottom = size.height
         guard bottom > top else { return }
         let depth = bottom - top
-        context.fill(Path(CGRect(x: 0, y: top, width: size.width, height: depth)),
-                     with: .linearGradient(Gradient(colors: [Color(red: 0.16, green: 0.24, blue: 0.46),
-                                                             Color(red: 0.07, green: 0.11, blue: 0.25),
-                                                             Color(red: 0.02, green: 0.04, blue: 0.11)]),
-                                           startPoint: CGPoint(x: 0, y: top),
-                                           endPoint: CGPoint(x: 0, y: bottom)))
+        let leftControlX = layout.buttonPoints.first?.x ?? layout.leftEdge
+        let rightControlX = layout.buttonPoints
+            .dropFirst(GameConfig.answerColumnCount).first?.x ?? layout.rightEdge
+        let leftJoin = leftControlX - layout.buttonSize * 0.58
+        let rightJoin = rightControlX + layout.buttonSize * 0.58
+        // Continue the exact perspective projection used by `drawColumn`.
+        // This makes the lower wall/floor joint the next depth line of the
+        // side wall instead of an independently angled decorative diagonal.
+        let vanishingY = layout.windowRect.midY
+        let projectedOuterTop = vanishingY + (top - vanishingY) * sideWallFrontSpread
 
-        var glow = context
+        // The side wall itself starts just outside the canvas (x = -2 / +2).
+        // Calculate the visible intersection at x = 0 / width so the joint is
+        // pixel-for-pixel collinear with the wall geometry above it.
+        let wallOverscan: CGFloat = 2
+        let projectionRun = max(1, leftJoin + wallOverscan)
+        let canvasEdgeProgress = wallOverscan / projectionRun
+        let outerTop = min(bottom,
+                           projectedOuterTop + (top - projectedOuterTop) * canvasEdgeProgress)
+
+        // The back edge stays level beneath the controls and windscreen. At
+        // both sides it advances toward the viewer, producing the two diagonal
+        // wall/floor joints that make this a room rather than a flat stripe.
+        var floorShape = Path()
+        floorShape.move(to: CGPoint(x: 0, y: outerTop))
+        floorShape.addLine(to: CGPoint(x: leftJoin, y: top))
+        floorShape.addLine(to: CGPoint(x: rightJoin, y: top))
+        floorShape.addLine(to: CGPoint(x: size.width, y: outerTop))
+        floorShape.addLine(to: CGPoint(x: size.width, y: bottom))
+        floorShape.addLine(to: CGPoint(x: 0, y: bottom))
+        floorShape.closeSubpath()
+
+        var deck = context
+        deck.clip(to: floorShape)
+        deck.fill(floorShape,
+                  with: .linearGradient(Gradient(colors: [Color(red: 0.16, green: 0.24, blue: 0.46),
+                                                          Color(red: 0.07, green: 0.11, blue: 0.25),
+                                                          Color(red: 0.02, green: 0.04, blue: 0.11)]),
+                                        startPoint: CGPoint(x: 0, y: top),
+                                        endPoint: CGPoint(x: 0, y: bottom)))
+
+        var glow = deck
         glow.blendMode = .plusLighter
         let sheen = CGRect(x: size.width * 0.18, y: top - depth * 0.3,
                            width: size.width * 0.64, height: depth * 0.9)
@@ -1918,7 +1973,7 @@ private struct SpaceshipCockpit: View {
             shoulder.addLine(to: CGPoint(x: innerBottom, y: bottom))
             shoulder.addLine(to: CGPoint(x: outer, y: bottom))
             shoulder.closeSubpath()
-            context.fill(shoulder,
+            deck.fill(shoulder,
                          with: .linearGradient(
                             Gradient(colors: [metalLight.opacity(0.62),
                                               metal,
@@ -1926,7 +1981,7 @@ private struct SpaceshipCockpit: View {
                             startPoint: CGPoint(x: innerTop, y: top),
                             endPoint: CGPoint(x: outer, y: bottom)
                          ))
-            context.stroke(shoulder, with: .color(.black.opacity(0.78)), lineWidth: isPad ? 4 : 2.5)
+            deck.stroke(shoulder, with: .color(.black.opacity(0.78)), lineWidth: isPad ? 4 : 2.5)
 
             let insetX = outer + side * size.width * 0.075
             let ventWidth = size.width * 0.085
@@ -1935,13 +1990,13 @@ private struct SpaceshipCockpit: View {
                               y: top + depth * 0.43,
                               width: ventWidth,
                               height: ventHeight)
-            drawVent(context, rect: vent)
+            drawVent(deck, rect: vent)
 
             for row in [0.17, 0.72] as [CGFloat] {
                 let y = top + depth * row
                 let progress = (y - top) / max(1, depth)
                 let x = innerTop + (innerBottom - innerTop) * progress
-                lightBar(context,
+                lightBar(deck,
                          center: CGPoint(x: x - side * size.width * 0.055, y: y),
                          length: size.width * 0.065,
                          thickness: isPad ? 4 : 2.5,
@@ -1957,7 +2012,7 @@ private struct SpaceshipCockpit: View {
         runway.addLine(to: CGPoint(x: size.width * 0.67, y: bottom))
         runway.addLine(to: CGPoint(x: size.width * 0.33, y: bottom))
         runway.closeSubpath()
-        context.fill(runway,
+        deck.fill(runway,
                      with: .linearGradient(
                         Gradient(colors: [Color(red: 0.19, green: 0.29, blue: 0.53),
                                           Color(red: 0.055, green: 0.09, blue: 0.22),
@@ -1965,8 +2020,8 @@ private struct SpaceshipCockpit: View {
                         startPoint: CGPoint(x: size.width / 2, y: top),
                         endPoint: CGPoint(x: size.width / 2, y: bottom)
                      ))
-        context.stroke(runway, with: .color(.black.opacity(0.82)), lineWidth: isPad ? 5 : 3)
-        var runwayGlow = context
+        deck.stroke(runway, with: .color(.black.opacity(0.82)), lineWidth: isPad ? 5 : 3)
+        var runwayGlow = deck
         runwayGlow.blendMode = .plusLighter
         runwayGlow.stroke(runway, with: .color(cyan.opacity(0.20)), lineWidth: isPad ? 9 : 6)
 
@@ -1974,27 +2029,39 @@ private struct SpaceshipCockpit: View {
         let topFraction = (top - vanishing.y) / (bottom - vanishing.y)
         for step in -7...7 {
             let x = size.width / 2 + CGFloat(step) * size.width * 0.11
-            seam(context,
+            seam(deck,
                  from: CGPoint(x: vanishing.x + (x - vanishing.x) * topFraction, y: top),
                  to: CGPoint(x: x, y: bottom))
         }
         for fraction in [0.12, 0.32, 0.62] as [CGFloat] {
             let y = top + depth * fraction
-            seam(context, from: CGPoint(x: 0, y: y), to: CGPoint(x: size.width, y: y))
+            seam(deck, from: CGPoint(x: 0, y: y), to: CGPoint(x: size.width, y: y))
         }
 
         let lightRow = top + depth * 0.22
         let rowFraction = (lightRow - vanishing.y) / (bottom - vanishing.y)
         for step in [-3, -2, 2, 3] {
             let x = vanishing.x + (CGFloat(step) - 0.5 * CGFloat(step.signum())) * size.width * 0.11 * rowFraction
-            lightBar(context,
+            lightBar(deck,
                      center: CGPoint(x: x, y: lightRow),
                      length: size.width * 0.045 * rowFraction,
                      thickness: isPad ? 3 : 2,
                      color: cyan)
         }
 
-        drawPlatform(in: context, size: size, floorDepth: depth, time: time)
+        drawPlatform(in: deck, size: size, floorDepth: depth, time: time)
+
+        var floorJoint = Path()
+        floorJoint.move(to: CGPoint(x: 0, y: outerTop))
+        floorJoint.addLine(to: CGPoint(x: leftJoin, y: top))
+        floorJoint.addLine(to: CGPoint(x: rightJoin, y: top))
+        floorJoint.addLine(to: CGPoint(x: size.width, y: outerTop))
+        context.stroke(floorJoint, with: .color(.black.opacity(0.92)),
+                       lineWidth: isPad ? 10 : 7)
+        context.stroke(floorJoint, with: .color(metalLight.opacity(0.62)),
+                       lineWidth: isPad ? 4 : 2.8)
+        context.stroke(floorJoint, with: .color(cyan.opacity(0.30)),
+                       lineWidth: isPad ? 1.5 : 1)
     }
 
     private func drawPlatform(in context: GraphicsContext, size: CGSize, floorDepth: CGFloat, time: TimeInterval) {
