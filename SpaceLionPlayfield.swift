@@ -73,16 +73,18 @@ struct SpaceLionPlayfield: View {
                                   rightReserve: rightReserve,
                                   isPad: isPad)
             let cockpitFeedbacks = round.map {
-                $0.options.prefix(8).map(feedback(for:))
+                $0.options.prefix(GameConfig.answerBubbleCount).map(feedback(for:))
             } ?? []
             ZStack {
                 SpaceshipCockpit(layout: metrics.cockpit,
+                                 character: character,
                                  isPad: isPad,
                                  isRunning: isRunning && !reduceMotion,
                                  feedbacks: cockpitFeedbacks)
 
                 if let round {
-                    ForEach(Array(round.options.prefix(8).enumerated()), id: \.element.id) { index, option in
+                    let answers = Array(round.options.prefix(GameConfig.answerBubbleCount))
+                    ForEach(Array(answers.enumerated()), id: \.element.id) { index, option in
                         answerButton(option,
                                      index: index,
                                      at: metrics.answerPoints[index],
@@ -90,7 +92,6 @@ struct SpaceLionPlayfield: View {
                                      size: metrics.answerSize,
                                      lionSize: metrics.lionSize)
                     }
-                    .animation(.spring(response: 0.36, dampingFraction: 0.82), value: round.id)
                 }
 
                 if let feedbackBurst {
@@ -191,11 +192,12 @@ struct SpaceLionPlayfield: View {
     }
 
     private func lion(metrics: Metrics) -> some View {
-        // The large sprite's idle drift and slow tumble do not benefit from
-        // 60 body evaluations per second. Explicit travel animations remain
-        // display-synchronised by SwiftUI, while the time-driven pose stays
-        // smooth at half the CPU invalidation rate.
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0,
+        // Pose, drift and the reach frames follow the clock. The flight itself
+        // must stay outside that clock: reading `motionOffset` inside the
+        // timeline makes SwiftUI drop the in-flight interpolation, so the lion
+        // vanishes between roughly a third and two thirds of the trip and then
+        // appears further along the path.
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0,
                                 paused: !isRunning || reduceMotion)) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
             let driftX = reduceMotion
@@ -209,8 +211,6 @@ struct SpaceLionPlayfield: View {
                 : idleRotation(at: timeline.date)
             let frameName = lionFrameName(at: timeline.date)
             let breathe = (reduceMotion || isMoving) ? 1 : (1 + sin(time * 1.35) * 0.022)
-            let placedOffset = CGSize(width: motionOffset.width + completionOffset.width + driftX,
-                                      height: motionOffset.height + completionOffset.height + driftY)
 
             ZStack {
                 Ellipse()
@@ -240,17 +240,23 @@ struct SpaceLionPlayfield: View {
                     }
                 }
                 .frame(width: metrics.lionSize, height: metrics.lionSize)
-                .rotationEffect(.degrees(rotation + celebrationSpin))
-                .scaleEffect(lionScale * breathe)
-                .shadow(color: Color(red: 0.25, green: 0.70, blue: 1).opacity(0.45), radius: 16)
-                .shadow(color: .black.opacity(0.35), radius: 10, y: 8)
+                .offset(poseAnchor(for: frameName, size: metrics.lionSize))
+                .rotationEffect(.degrees(rotation))
+                .scaleEffect(breathe)
             }
-            .opacity(lionOpacity)
-            .offset(placedOffset)
-            .position(metrics.centre)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+            .offset(x: driftX, y: driftY)
         }
+        .frame(width: metrics.lionSize, height: metrics.lionSize)
+        .rotationEffect(.degrees(celebrationSpin))
+        .scaleEffect(lionScale)
+        .opacity(lionOpacity)
+        .offset(x: motionOffset.width + completionOffset.width,
+                y: motionOffset.height + completionOffset.height)
+        .shadow(color: Color(red: 0.25, green: 0.70, blue: 1).opacity(0.45), radius: 16)
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 8)
+        .position(metrics.centre)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private func lionImage(_ name: String, size: CGFloat) -> some View {
@@ -266,23 +272,36 @@ struct SpaceLionPlayfield: View {
         case .idle, .orientingOut:
             return "1.1"
         case .travellingOut:
-            // Exactly one extension: tuck, reach, point, then hold the fully
-            // extended finger for the rest of the glide. Never loop here.
-            let frames = ["1.2", "1.3", "1.4", "1.5"]
-            return frames[min(frames.count - 1, Int(elapsed / 0.12))]
-        case .contact:
+            // One tuck, then the pointing pose for the rest of the glide.
+            // Stepping through every in-between frame shifted the body and
+            // read as a hitch along the path.
+            return elapsed < 0.18 ? "1.2" : "1.5"
+        case .contact, .pushingOff:
             return "1.5"
-        case .pushingOff:
-            // Retract once while the finger is against the button. This reads
-            // as a push-off instead of replaying the forward reach animation.
-            let frames = ["1.5", "1.4", "1.3", "1.2"]
-            return frames[min(frames.count - 1, Int(elapsed / 0.045))]
         case .travellingHome:
-            return "1.2"
+            return elapsed < 0.28 ? "1.5" : "1.2"
         case .settling:
-            let frames = ["1.6", "1.7", "1.8"]
-            return frames[min(frames.count - 1, Int(elapsed / 0.11))]
+            return elapsed < 0.34 ? "1.2" : "1.1"
         }
+    }
+
+    /// The supplied poses are not drawn on the same body centre. Nudging each
+    /// one onto the pointing pose keeps the lion from stepping sideways every
+    /// time the artwork changes. Frame 1.5 stays put: the fingertip reach is
+    /// measured from that pose.
+    private func poseAnchor(for frame: String, size: CGFloat) -> CGSize {
+        let fraction: (CGFloat, CGFloat)
+        switch frame {
+        case "1.1": fraction = (0.063, -0.055)
+        case "1.2": fraction = (0.101, -0.050)
+        case "1.3": fraction = (0.146, -0.069)
+        case "1.4": fraction = (0.096, -0.062)
+        case "1.6": fraction = (-0.012, 0.001)
+        case "1.7": fraction = (0.039, -0.003)
+        case "1.8": fraction = (0.074, -0.007)
+        default: fraction = (0, 0)
+        }
+        return CGSize(width: fraction.0 * size, height: fraction.1 * size)
     }
 
     private func select(_ option: AnswerOption,
@@ -335,33 +354,31 @@ struct SpaceLionPlayfield: View {
             }
             beginOutwardTravel(option,
                                 target: target,
-                                destination: destination,
                                 pressedDestination: pressedDestination,
                                 token: token)
         }
     }
 
-    private var orientDuration: Double { reduceMotion ? 0.10 : 0.42 }
-    private var outwardDuration: Double { reduceMotion ? 0.20 : 0.98 }
-    private var pressDuration: Double { reduceMotion ? 0.04 : 0.055 }
-    private var pushOffDuration: Double { reduceMotion ? 0.08 : 0.18 }
-    // Together, push-off and glide take exactly as long as the outward trip.
-    private var returnDuration: Double { outwardDuration - pushOffDuration }
-    private var settleDuration: Double { reduceMotion ? 0.06 : 0.18 }
+    private var orientDuration: Double { reduceMotion ? 0.10 : 0.38 }
+    private var outwardDuration: Double { reduceMotion ? 0.20 : 1.16 }
+    private var pressDuration: Double { reduceMotion ? 0.04 : 0.10 }
+    private var pushOffDuration: Double { reduceMotion ? 0.08 : 0.20 }
+    /// Long enough for a weightless arrival: most of the distance is covered
+    /// early, and the last stretch only drifts to a stop.
+    private var returnDuration: Double { reduceMotion ? 0.24 : 1.28 }
+    private var settleDuration: Double { reduceMotion ? 0.08 : 0.56 }
 
     private func beginOutwardTravel(_ option: AnswerOption,
                                      target: CGPoint,
-                                     destination: CGSize,
                                      pressedDestination: CGSize,
                                      token: Int) {
         motionPhase = .travellingOut
         phaseStarted = Date()
-        // Ease into the flight, then keep meaningful velocity all the way to
-        // the button. The former curve had a zero end velocity, which made the
-        // final stretch visibly crawl despite a very fast first half.
-        withAnimation(.timingCurve(0.30, 0.04, 0.70, 0.70,
+        // Leave gently and arrive at rest, already pressed into the button.
+        // A second animation for that last nudge used to cut the glide.
+        withAnimation(.timingCurve(0.35, 0.00, 0.55, 1.00,
                                    duration: outwardDuration)) {
-            motionOffset = destination
+            motionOffset = pressedDestination
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + outwardDuration) {
@@ -372,14 +389,12 @@ struct SpaceLionPlayfield: View {
             }
             reachButton(option,
                         target: target,
-                        pressedDestination: pressedDestination,
                         token: token)
         }
     }
 
     private func reachButton(_ option: AnswerOption,
                              target: CGPoint,
-                             pressedDestination: CGSize,
                              token: Int) {
         motionPhase = .contact
         phaseStarted = Date()
@@ -407,10 +422,9 @@ struct SpaceLionPlayfield: View {
             }
         }
 
-        // Load the fingertip against the answer before releasing the spring.
-        // This makes the return feel powered by the hand contact itself.
-        withAnimation(.easeOut(duration: pressDuration)) {
-            motionOffset = pressedDestination
+        // The glide already ended on the pressed fingertip. Only the button
+        // cap moves here, so the lion's path is not retargeted mid-flight.
+        withAnimation(.timingCurve(0.20, 0.00, 0.40, 1.00, duration: pressDuration)) {
             buttonImpactScale = 0.92
         }
 
@@ -423,14 +437,12 @@ struct SpaceLionPlayfield: View {
     private func beginPushOff(token: Int) {
         motionPhase = .pushingOff
         phaseStarted = Date()
-        // One continuous recoil avoids a velocity reset between push-off and
-        // the glide home. The phase change below now affects only the pose.
-        // This is the exact time-reverse of the outward timing curve. The lion
-        // therefore leaves the button at its arrival speed and covers the same
-        // distance home in the same amount of time.
+        // One continuous glide home. It leaves with the push and spends the
+        // last third of the trip drifting to a stop, instead of arriving with
+        // speed and then halting.
         let recoilAnimation: Animation = reduceMotion
             ? .linear(duration: pushOffDuration + returnDuration)
-            : .timingCurve(0.30, 0.30, 0.70, 0.96,
+            : .timingCurve(0.18, 0.35, 0.36, 1.00,
                            duration: pushOffDuration + returnDuration)
         let buttonAnimation: Animation = reduceMotion
             ? .easeOut(duration: 0.10)
@@ -443,6 +455,14 @@ struct SpaceLionPlayfield: View {
         }
         withAnimation(buttonAnimation) {
             buttonImpactScale = 1
+        }
+
+        let homeDuration = pushOffDuration + returnDuration
+        DispatchQueue.main.asyncAfter(deadline: .now() + homeDuration * 0.58) {
+            guard actionSequence == token else { return }
+            withAnimation(.easeInOut(duration: homeDuration * 0.62)) {
+                driftAmount = 1
+            }
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + pushOffDuration) {
@@ -503,8 +523,10 @@ struct SpaceLionPlayfield: View {
         withTransaction(reset) {
             celebrationSpin = 0
         }
-        withAnimation(.easeInOut(duration: reduceMotion ? 0.08 : 0.28)) {
-            driftAmount = 1
+        if driftAmount < 1 {
+            withAnimation(.easeOut(duration: reduceMotion ? 0.08 : 0.45)) {
+                driftAmount = 1
+            }
         }
     }
 
@@ -588,7 +610,7 @@ struct SpaceLionPlayfield: View {
     }
 }
 
-private extension SpaceLionPlayfield {
+extension SpaceLionPlayfield {
     struct Metrics {
         let size: CGSize
         let topReserve: CGFloat
@@ -597,36 +619,61 @@ private extension SpaceLionPlayfield {
         let rightReserve: CGFloat
         let isPad: Bool
 
-        private var columnTop: CGFloat { topReserve + (isPad ? 12 : 6) }
-        private var columnBottom: CGFloat {
-            size.height - max(bottomReserve, isPad ? 16 : 8) - (isPad ? 6 : 2)
+        /// The answer bank starts immediately below the overhead rail. The
+        /// proportional nudge keeps the same visual breathing room on a short
+        /// phone and a large iPad instead of relying on one device-sized gap.
+        private var columnTop: CGFloat {
+            topReserve + max(isPad ? 14 : 8, size.height * 0.018)
         }
-        private var slotHeight: CGFloat { max(1, (columnBottom - columnTop) / 4) }
+        private var columnBottom: CGFloat {
+            let safeBottom = size.height - max(bottomReserve, isPad ? 16 : 8)
+            // End the answer bank just above the deck. The larger modules sit
+            // lower here while the last answer still clears the foreground
+            // console instead of floating against the bottom edge.
+            return min(safeBottom - size.height * (isPad ? 0.10 : 0.08),
+                       size.height * (isPad ? 0.78 : 0.80))
+        }
+        private var slotHeight: CGFloat {
+            max(1, (columnBottom - columnTop) / CGFloat(GameConfig.answerColumnCount))
+        }
 
         var answerSize: CGFloat {
-            min(slotHeight * 0.90, isPad ? 150 : 112, size.width * 0.16)
+            // `size` is the complete mechanical module; the illuminated stone
+            // inside remains comfortably above the 44 pt touch minimum.
+            min(max(slotHeight * 0.91, isPad ? 86 : 67),
+                isPad ? 151 : 110,
+                size.width * 0.162)
         }
-        private var columnPadding: CGFloat { answerSize * 0.17 }
+        private var columnPadding: CGFloat { answerSize * 0.13 }
+        /// Physical cabinet visible outside the answer modules. Keeping this
+        /// proportional (and capped by the module size) leaves enough room for
+        /// a readable side face on phones without swallowing the play window
+        /// on an iPad.
+        private var cabinetDepth: CGFloat {
+            min(size.width * 0.04, answerSize * 0.34)
+        }
         private var leftX: CGFloat {
-            max(leftReserve, isPad ? 16 : 8) + columnPadding + answerSize / 2
+            max(leftReserve, isPad ? 16 : 8) + cabinetDepth + answerSize * 0.56
         }
         private var rightX: CGFloat {
-            size.width - max(rightReserve, isPad ? 16 : 8) - columnPadding - answerSize / 2
+            size.width - max(rightReserve, isPad ? 16 : 8) - cabinetDepth - answerSize * 0.56
         }
 
-        /// Four controls in each side column, read top to bottom: the lowest
+        /// Three controls in each side column, read top to bottom: the lowest
         /// values on the left wall, the highest on the right wall.
         var answerPoints: [CGPoint] {
-            let rows = (0..<4).map { columnTop + slotHeight * (CGFloat($0) + 0.5) }
+            let rows = (0..<GameConfig.answerColumnCount).map {
+                columnTop + slotHeight * (CGFloat($0) + 0.5)
+            }
             return rows.map { CGPoint(x: leftX, y: $0) } + rows.map { CGPoint(x: rightX, y: $0) }
         }
 
-        var cockpit: CockpitLayout {
+        fileprivate var cockpit: CockpitLayout {
             let leftEdge = leftX + answerSize / 2 + columnPadding
             let rightEdge = rightX - answerSize / 2 - columnPadding
-            let gap: CGFloat = isPad ? 30 : 18
+            let gap: CGFloat = isPad ? 36 : 22
             let top = topReserve + (isPad ? 16 : 10)
-            let bottom = max(top + 60, size.height * (isPad ? 0.76 : 0.78))
+            let bottom = max(top + 60, size.height * (isPad ? 0.72 : 0.73))
             return CockpitLayout(
                 windowRect: CGRect(x: leftEdge + gap,
                                    y: top,
@@ -636,6 +683,15 @@ private extension SpaceLionPlayfield {
                 rightEdge: rightEdge,
                 buttonPoints: answerPoints,
                 buttonSize: answerSize)
+        }
+
+        /// Shared with the HUD so the pause control sits on the exact same
+        /// vertical axis as the left answers, and the score panel terminates on
+        /// the outside edge of the right answer bank at every device size.
+        func hudInsets(pauseWidth: CGFloat) -> (leading: CGFloat, trailing: CGFloat) {
+            let leading = max(0, leftX - pauseWidth / 2)
+            let trailing = max(0, size.width - (rightX + answerSize / 2))
+            return (leading, trailing)
         }
 
         var centre: CGPoint {
@@ -714,6 +770,89 @@ private struct SpaceConsoleButton: View {
     var body: some View {
         let colors = palette
         ZStack {
+            // One self-contained control module. The plate, socket, rails and
+            // cap scale together, so this button remains part of the cabinet
+            // instead of looking like a circle laid over a background image.
+            SpaceModuleShape(cut: size * 0.23)
+                .fill(LinearGradient(
+                    colors: [Color(red: 0.28, green: 0.36, blue: 0.54),
+                             Color(red: 0.08, green: 0.12, blue: 0.24),
+                             Color(red: 0.025, green: 0.035, blue: 0.09)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ))
+                .overlay {
+                    SpaceModuleShape(cut: size * 0.23)
+                        .stroke(LinearGradient(colors: [.white.opacity(0.46),
+                                                        .white.opacity(0.05),
+                                                        .black.opacity(0.88)],
+                                               startPoint: .top,
+                                               endPoint: .bottom),
+                                lineWidth: max(1, size * 0.025))
+                }
+                .shadow(color: .black.opacity(0.75), radius: size * 0.055,
+                        y: size * 0.035)
+
+            SpaceModuleShape(cut: size * 0.18)
+                .fill(Color(red: 0.025, green: 0.04, blue: 0.10))
+                .overlay {
+                    SpaceModuleShape(cut: size * 0.18)
+                        .stroke(colors.glow.opacity(0.34),
+                                lineWidth: max(1, size * 0.012))
+                }
+                .padding(size * 0.075)
+
+            // Recessed vertical service channels visually lock the module into
+            // the continuous console bank painted behind it.
+            HStack(spacing: size * 0.68) {
+                ForEach(0..<2, id: \.self) { side in
+                    ZStack {
+                        Capsule()
+                            .fill(.black.opacity(0.72))
+                            .frame(width: size * 0.075, height: size * 0.43)
+                        Capsule()
+                            .fill(LinearGradient(colors: [colors.glow.opacity(0.95),
+                                                          colors.glow.opacity(0.18)],
+                                                 startPoint: .top,
+                                                 endPoint: .bottom))
+                            .frame(width: size * 0.025, height: size * 0.31)
+                            .shadow(color: colors.glow.opacity(0.72),
+                                    radius: size * 0.035)
+                        if side == 0 {
+                            ForEach(0..<3, id: \.self) { index in
+                                Capsule()
+                                    .fill(.white.opacity(0.22))
+                                    .frame(width: size * 0.035, height: size * 0.008)
+                                    .offset(y: (CGFloat(index) - 1) * size * 0.095)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Mechanical corner fasteners and short amber power brackets.
+            ForEach(0..<4, id: \.self) { index in
+                let x: CGFloat = index.isMultiple(of: 2) ? -1 : 1
+                let y: CGFloat = index < 2 ? -1 : 1
+                ZStack {
+                    Circle()
+                        .fill(RadialGradient(colors: [.white.opacity(0.78),
+                                                      Color(red: 0.34, green: 0.43, blue: 0.58),
+                                                      .black],
+                                             center: UnitPoint(x: 0.35, y: 0.30),
+                                             startRadius: 0,
+                                             endRadius: size * 0.035))
+                        .frame(width: size * 0.07, height: size * 0.07)
+                    Capsule()
+                        .fill(Color(red: 1.00, green: 0.57, blue: 0.08))
+                        .frame(width: size * 0.11, height: size * 0.025)
+                        .offset(x: -x * size * 0.075)
+                        .shadow(color: Color(red: 1.00, green: 0.45, blue: 0.04),
+                                radius: size * 0.025)
+                }
+                .offset(x: x * size * 0.35, y: y * size * 0.35)
+            }
+
             Circle()
                 .fill(LinearGradient(colors: [Color(red: 0.28, green: 0.36, blue: 0.52),
                                               Color(red: 0.08, green: 0.11, blue: 0.20),
@@ -1001,6 +1140,7 @@ private struct SpaceshipCockpit: View {
     }
 
     let layout: CockpitLayout
+    let character: AnimalCharacter
     let isPad: Bool
     let isRunning: Bool
     let feedbacks: [HoopFeedback]
@@ -1392,23 +1532,222 @@ private struct SpaceshipCockpit: View {
         let inward: CGFloat = innerIsTrailing ? -1 : 1
         let buttonSize = layout.buttonSize
 
-        context.fill(Path(rect),
-                     with: .linearGradient(Gradient(colors: [metalDark, metal, metalLight]),
-                                           startPoint: CGPoint(x: outerX, y: 0),
-                                           endPoint: CGPoint(x: innerX, y: 0)))
-        seam(context,
-             from: CGPoint(x: outerX - inward * rect.width * 0.18, y: 0),
-             to: CGPoint(x: outerX - inward * rect.width * 0.18, y: size.height))
+        let mounts = layout.buttonPoints.enumerated().filter { $0.element.x > minX && $0.element.x < maxX }
+        let points = mounts.map(\.element)
+        let controlX = points.first?.x ?? rect.midX
+        // The backplane continues from behind the answer stones toward the
+        // glass. Only beyond the outside edge of the stones does the thick,
+        // perspective cabinet return begin.
+        let outerModuleEdge = controlX + inward * buttonSize * 0.54
+        let backplaneMinX = innerIsTrailing ? outerModuleEdge : innerX
+        let backplaneMaxX = innerIsTrailing ? innerX : outerModuleEdge
+        let backplane = CGRect(x: min(backplaneMinX, backplaneMaxX),
+                               y: 0,
+                               width: abs(backplaneMaxX - backplaneMinX),
+                               height: size.height)
+        let returnMinX = innerIsTrailing ? minX : outerModuleEdge
+        let returnMaxX = innerIsTrailing ? outerModuleEdge : maxX
+        let cabinetReturn = CGRect(x: min(returnMinX, returnMaxX),
+                                   y: 0,
+                                   width: abs(returnMaxX - returnMinX),
+                                   height: size.height)
+
+        context.fill(Path(rect), with: .color(metalDark))
+        context.fill(Path(backplane),
+                     with: .linearGradient(
+                        Gradient(colors: [Color(red: 0.05, green: 0.08, blue: 0.18),
+                                          Color(red: 0.12, green: 0.18, blue: 0.34),
+                                          Color(red: 0.035, green: 0.055, blue: 0.13)]),
+                        startPoint: CGPoint(x: outerModuleEdge, y: 0),
+                        endPoint: CGPoint(x: innerX, y: 0)
+                     ))
+
+        // A genuinely extruded outer return. Each armour segment has a front,
+        // an inward-facing side and a lower face, while the heavy spine and
+        // illuminated throat make the cabinet read as a volume rather than a
+        // patterned strip behind the controls.
+        if cabinetReturn.width > 1 {
+            let towardInner = -inward
+            let depth = min(isPad ? 18 : 12,
+                            max(4, cabinetReturn.width * 0.24))
+            context.fill(Path(cabinetReturn),
+                         with: .linearGradient(
+                            Gradient(colors: [Color(red: 0.008, green: 0.014, blue: 0.042),
+                                              Color(red: 0.08, green: 0.12, blue: 0.24),
+                                              metalLight.opacity(0.68),
+                                              Color(red: 0.025, green: 0.04, blue: 0.10)]),
+                            startPoint: CGPoint(x: outerX, y: 0),
+                            endPoint: CGPoint(x: outerModuleEdge, y: 0)
+                         ))
+
+            // A raised backbone at the hull edge gives the entire return a
+            // second depth plane before the individual armour blocks begin.
+            let spineWidth = max(4, cabinetReturn.width * 0.24)
+            let spine = CGRect(x: innerIsTrailing
+                               ? cabinetReturn.minX
+                               : cabinetReturn.maxX - spineWidth,
+                               y: 0,
+                               width: spineWidth,
+                               height: size.height)
+            context.fill(Path(spine),
+                         with: .linearGradient(
+                            Gradient(colors: innerIsTrailing
+                                     ? [Color.black.opacity(0.94), metalLight.opacity(0.72), metalDark]
+                                     : [metalDark, metalLight.opacity(0.72), Color.black.opacity(0.94)]),
+                            startPoint: CGPoint(x: spine.minX, y: 0),
+                            endPoint: CGPoint(x: spine.maxX, y: 0)))
+            let spineEdgeX = innerIsTrailing ? spine.maxX : spine.minX
+            var spineEdge = Path()
+            spineEdge.move(to: CGPoint(x: spineEdgeX, y: 0))
+            spineEdge.addLine(to: CGPoint(x: spineEdgeX, y: size.height))
+            context.stroke(spineEdge, with: .color(.black.opacity(0.90)), lineWidth: isPad ? 6 : 4)
+            context.stroke(spineEdge.offsetBy(dx: towardInner * (isPad ? 2.5 : 1.5), dy: 0),
+                           with: .color(.white.opacity(0.20)), lineWidth: isPad ? 1.8 : 1.1)
+
+            let panelInset = max(2, cabinetReturn.width * 0.12)
+            let panelWidth = max(1, cabinetReturn.width - panelInset * 1.65)
+            let segmentHeight = size.height / 4
+            for segment in 0..<4 {
+                let rearPanel = CGRect(
+                    x: innerIsTrailing
+                        ? cabinetReturn.minX + panelInset * 0.72
+                        : cabinetReturn.maxX - panelWidth - panelInset * 0.72,
+                    y: CGFloat(segment) * segmentHeight + segmentHeight * 0.08,
+                    width: panelWidth,
+                    height: segmentHeight * 0.84
+                )
+                let frontPanel = rearPanel.offsetBy(dx: inward * depth * 0.42,
+                                                    dy: -depth * 0.28)
+                let cut = min(frontPanel.width * 0.24,
+                              frontPanel.height * 0.18)
+
+                // Contact shadow, then the two exposed faces between the rear
+                // footprint and the raised front plate.
+                let shadow = chamfered(rearPanel.offsetBy(dx: inward * depth * 0.18,
+                                                          dy: depth * 0.34),
+                                       cut: cut)
+                context.fill(shadow, with: .color(.black.opacity(0.62)))
+
+                let frontInnerX = innerIsTrailing ? frontPanel.maxX : frontPanel.minX
+                let rearInnerX = innerIsTrailing ? rearPanel.maxX : rearPanel.minX
+                var sideFace = Path()
+                sideFace.move(to: CGPoint(x: frontInnerX, y: frontPanel.minY + cut))
+                sideFace.addLine(to: CGPoint(x: rearInnerX, y: rearPanel.minY + cut + depth * 0.32))
+                sideFace.addLine(to: CGPoint(x: rearInnerX, y: rearPanel.maxY - cut * 0.72))
+                sideFace.addLine(to: CGPoint(x: frontInnerX, y: frontPanel.maxY - cut))
+                sideFace.closeSubpath()
+                context.fill(sideFace,
+                             with: .linearGradient(
+                                Gradient(colors: [metalLight.opacity(0.72),
+                                                  metal.opacity(0.92),
+                                                  Color.black.opacity(0.88)]),
+                                startPoint: CGPoint(x: 0, y: frontPanel.minY),
+                                endPoint: CGPoint(x: 0, y: rearPanel.maxY)))
+                context.stroke(sideFace, with: .color(.black.opacity(0.78)), lineWidth: 1)
+
+                var lowerFace = Path()
+                lowerFace.move(to: CGPoint(x: frontPanel.minX + cut, y: frontPanel.maxY))
+                lowerFace.addLine(to: CGPoint(x: frontPanel.maxX - cut, y: frontPanel.maxY))
+                lowerFace.addLine(to: CGPoint(x: rearPanel.maxX - cut, y: rearPanel.maxY))
+                lowerFace.addLine(to: CGPoint(x: rearPanel.minX + cut, y: rearPanel.maxY))
+                lowerFace.closeSubpath()
+                context.fill(lowerFace,
+                             with: .linearGradient(
+                                Gradient(colors: [metal.opacity(0.76), .black.opacity(0.94)]),
+                                startPoint: CGPoint(x: 0, y: frontPanel.maxY),
+                                endPoint: CGPoint(x: 0, y: rearPanel.maxY)))
+                context.stroke(lowerFace, with: .color(.black.opacity(0.84)), lineWidth: 1)
+
+                let panelPath = chamfered(frontPanel, cut: cut)
+                context.fill(panelPath,
+                             with: .linearGradient(
+                                Gradient(colors: segment.isMultiple(of: 2)
+                                    ? [Color(red: 0.22, green: 0.31, blue: 0.54),
+                                       Color(red: 0.06, green: 0.10, blue: 0.24),
+                                       Color(red: 0.018, green: 0.03, blue: 0.09)]
+                                    : [Color(red: 0.08, green: 0.13, blue: 0.28),
+                                       Color(red: 0.20, green: 0.28, blue: 0.49),
+                                       Color(red: 0.035, green: 0.06, blue: 0.15)]),
+                                startPoint: CGPoint(x: frontPanel.minX, y: frontPanel.minY),
+                                endPoint: CGPoint(x: frontPanel.maxX, y: frontPanel.maxY)
+                             ))
+                context.stroke(panelPath,
+                               with: .color(.black.opacity(0.82)),
+                               lineWidth: isPad ? 3.5 : 2.2)
+                context.stroke(chamfered(frontPanel.insetBy(dx: max(1, frontPanel.width * 0.055),
+                                                            dy: max(1, frontPanel.height * 0.055)),
+                                           cut: min(frontPanel.width * 0.17,
+                                                    frontPanel.height * 0.12)),
+                               with: .linearGradient(
+                                Gradient(colors: [.white.opacity(0.35),
+                                                  cyan.opacity(0.12),
+                                                  .black.opacity(0.48)]),
+                                startPoint: CGPoint(x: 0, y: frontPanel.minY),
+                                endPoint: CGPoint(x: 0, y: frontPanel.maxY)),
+                               lineWidth: isPad ? 1.5 : 1)
+
+                // A hard specular top edge makes the extrusion survive even
+                // when the panel is only a few dozen points wide.
+                var topBevel = Path()
+                topBevel.move(to: CGPoint(x: frontPanel.minX + cut, y: frontPanel.minY))
+                topBevel.addLine(to: CGPoint(x: frontPanel.maxX - cut, y: frontPanel.minY))
+                context.stroke(topBevel, with: .color(.white.opacity(0.36)),
+                               lineWidth: isPad ? 2.2 : 1.4)
+
+                // Alternating vents and reactor slits stop the outside return
+                // reading as a broad, featureless wall on extra-wide devices.
+                if segment.isMultiple(of: 2) {
+                    let vent = CGRect(x: frontPanel.minX + frontPanel.width * 0.18,
+                                      y: frontPanel.midY - frontPanel.height * 0.12,
+                                      width: frontPanel.width * 0.64,
+                                      height: frontPanel.height * 0.24)
+                    drawVent(context, rect: vent)
+                } else {
+                    for bar in 0..<3 {
+                        let y = frontPanel.midY + (CGFloat(bar) - 1) * frontPanel.height * 0.13
+                        lightBar(context,
+                                 center: CGPoint(x: frontPanel.midX, y: y),
+                                 length: frontPanel.width * (bar == 1 ? 0.54 : 0.34),
+                                 thickness: isPad ? 3.2 : 2.1,
+                                 color: bar == 1 ? orange : cyan)
+                    }
+                }
+            }
+
+            // Deep throat beside the answer module: three parallel edges with
+            // different lighting create a clear step back into the cabinet.
+            var throat = Path()
+            throat.move(to: CGPoint(x: outerModuleEdge, y: 0))
+            throat.addLine(to: CGPoint(x: outerModuleEdge, y: size.height))
+            context.stroke(throat, with: .color(.black.opacity(0.96)),
+                           lineWidth: isPad ? 12 : 8)
+            context.stroke(throat.offsetBy(dx: inward * (isPad ? 3.5 : 2.3), dy: 0),
+                           with: .color(metalLight.opacity(0.62)),
+                           lineWidth: isPad ? 5 : 3.2)
+            context.stroke(throat.offsetBy(dx: towardInner * (isPad ? 1.5 : 1), dy: 0),
+                           with: .color(cyan.opacity(0.66)),
+                           lineWidth: isPad ? 2.1 : 1.4)
+        }
+
+        // Long rails make the three controls read as one engineered assembly.
+        let bankTop = max(0, (points.first?.y ?? 0) - buttonSize * 0.62)
+        let bankBottom = min(size.height, (points.last?.y ?? size.height) + buttonSize * 0.62)
+        for fraction in [0.12, 0.88] as [CGFloat] {
+            let x = backplane.minX + backplane.width * fraction
+            var rail = Path()
+            rail.move(to: CGPoint(x: x, y: bankTop))
+            rail.addLine(to: CGPoint(x: x, y: bankBottom))
+            context.stroke(rail, with: .color(.black.opacity(0.82)), lineWidth: isPad ? 7 : 5)
+            context.stroke(rail, with: .color(metalLight.opacity(0.28)), lineWidth: isPad ? 2 : 1.3)
+        }
 
         var edge = Path()
         edge.move(to: CGPoint(x: innerX, y: 0))
         edge.addLine(to: CGPoint(x: innerX, y: size.height))
-        context.stroke(edge, with: .color(.black.opacity(0.8)), lineWidth: 4)
-        context.stroke(edge.offsetBy(dx: inward * 2.5, dy: 0),
-                       with: .color(.white.opacity(0.18)), lineWidth: 1)
+        context.stroke(edge, with: .color(.black.opacity(0.88)), lineWidth: isPad ? 7 : 5)
+        context.stroke(edge.offsetBy(dx: inward * (isPad ? 4 : 2.5), dy: 0),
+                       with: .color(cyan.opacity(0.40)), lineWidth: isPad ? 1.8 : 1.2)
 
-        let mounts = layout.buttonPoints.enumerated().filter { $0.element.x > minX && $0.element.x < maxX }
-        let points = mounts.map(\.element)
         let frameX = innerIsTrailing
             ? window.minX - frameWidth * 0.5
             : window.maxX + frameWidth * 0.5
@@ -1425,15 +1764,18 @@ private struct SpaceshipCockpit: View {
 
             guard index + 1 < points.count else { continue }
             let between = (point.y + points[index + 1].y) / 2
-            seam(context,
-                 from: CGPoint(x: minX, y: between),
-                 to: CGPoint(x: maxX, y: between))
+            // Each separator is a recessed bridge, not a seam across the whole
+            // wall; this preserves the continuous vertical console silhouette.
+            let bridgeStart = CGPoint(x: outerModuleEdge, y: between)
+            let bridgeEnd = CGPoint(x: innerX, y: between)
+            seam(context, from: bridgeStart, to: bridgeEnd)
+            let bridgeWidth = abs(bridgeEnd.x - bridgeStart.x)
             lightBar(context,
-                     center: CGPoint(x: innerX + inward * 7, y: between),
-                     length: buttonSize * 0.16,
+                     center: CGPoint(x: (outerModuleEdge + innerX) / 2, y: between),
+                     length: min(buttonSize * 0.24, bridgeWidth * 0.55),
                      thickness: isPad ? 3.5 : 2.5,
                      color: cyan,
-                     vertical: true)
+                     vertical: false)
         }
     }
 
@@ -1580,6 +1922,72 @@ private struct SpaceshipCockpit: View {
                                         startRadius: 0,
                                         endRadius: sheen.width * 0.5))
 
+        // Layered shoulder consoles fill the space freed by the lifted answer
+        // banks. Their converging edges carry the side cabinets into the floor
+        // instead of ending at a flat horizontal strip.
+        for side in [-1.0, 1.0] as [CGFloat] {
+            let isLeft = side < 0
+            let outer = isLeft ? CGFloat(0) : size.width
+            let innerTop = size.width * (isLeft ? 0.31 : 0.69)
+            let innerBottom = size.width * (isLeft ? 0.22 : 0.78)
+            var shoulder = Path()
+            shoulder.move(to: CGPoint(x: outer, y: top))
+            shoulder.addLine(to: CGPoint(x: innerTop, y: top))
+            shoulder.addLine(to: CGPoint(x: innerBottom, y: bottom))
+            shoulder.addLine(to: CGPoint(x: outer, y: bottom))
+            shoulder.closeSubpath()
+            context.fill(shoulder,
+                         with: .linearGradient(
+                            Gradient(colors: [metalLight.opacity(0.62),
+                                              metal,
+                                              metalDark]),
+                            startPoint: CGPoint(x: innerTop, y: top),
+                            endPoint: CGPoint(x: outer, y: bottom)
+                         ))
+            context.stroke(shoulder, with: .color(.black.opacity(0.78)), lineWidth: isPad ? 4 : 2.5)
+
+            let insetX = outer + side * size.width * 0.075
+            let ventWidth = size.width * 0.085
+            let ventHeight = max(8, depth * 0.13)
+            let vent = CGRect(x: isLeft ? insetX : insetX - ventWidth,
+                              y: top + depth * 0.43,
+                              width: ventWidth,
+                              height: ventHeight)
+            drawVent(context, rect: vent)
+
+            for row in [0.17, 0.72] as [CGFloat] {
+                let y = top + depth * row
+                let progress = (y - top) / max(1, depth)
+                let x = innerTop + (innerBottom - innerTop) * progress
+                lightBar(context,
+                         center: CGPoint(x: x - side * size.width * 0.055, y: y),
+                         length: size.width * 0.065,
+                         thickness: isPad ? 4 : 2.5,
+                         color: row < 0.5 ? orange : cyan)
+            }
+        }
+
+        // A raised central runway frames the holographic character seal and
+        // adds a second depth layer beneath the windscreen sill.
+        var runway = Path()
+        runway.move(to: CGPoint(x: size.width * 0.42, y: top))
+        runway.addLine(to: CGPoint(x: size.width * 0.58, y: top))
+        runway.addLine(to: CGPoint(x: size.width * 0.67, y: bottom))
+        runway.addLine(to: CGPoint(x: size.width * 0.33, y: bottom))
+        runway.closeSubpath()
+        context.fill(runway,
+                     with: .linearGradient(
+                        Gradient(colors: [Color(red: 0.19, green: 0.29, blue: 0.53),
+                                          Color(red: 0.055, green: 0.09, blue: 0.22),
+                                          Color(red: 0.02, green: 0.035, blue: 0.10)]),
+                        startPoint: CGPoint(x: size.width / 2, y: top),
+                        endPoint: CGPoint(x: size.width / 2, y: bottom)
+                     ))
+        context.stroke(runway, with: .color(.black.opacity(0.82)), lineWidth: isPad ? 5 : 3)
+        var runwayGlow = context
+        runwayGlow.blendMode = .plusLighter
+        runwayGlow.stroke(runway, with: .color(cyan.opacity(0.20)), lineWidth: isPad ? 9 : 6)
+
         let vanishing = CGPoint(x: size.width / 2, y: top - depth * 2.4)
         let topFraction = (top - vanishing.y) / (bottom - vanishing.y)
         for step in -7...7 {
@@ -1611,7 +2019,7 @@ private struct SpaceshipCockpit: View {
         let width = min(size.width * 0.40, layout.windowRect.width * 0.62)
         let height = min(width * 0.30, floorDepth * 1.5)
         let pad = CGRect(x: size.width / 2 - width / 2,
-                         y: size.height - height * 0.62,
+                         y: size.height - height * 0.76,
                          width: width,
                          height: height)
         let centre = CGPoint(x: pad.midX, y: pad.midY)
@@ -1657,10 +2065,10 @@ private struct SpaceshipCockpit: View {
                        with: .color(cyan.opacity(0.55)), lineWidth: isPad ? 2 : 1.4)
         context.stroke(Path(ellipseIn: pad.insetBy(dx: width * 0.34, dy: height * 0.34)),
                        with: .color(.white.opacity(0.35)), lineWidth: 1)
-        drawLionMark(in: context,
-                     centre: CGPoint(x: centre.x, y: centre.y - height * 0.02),
-                     radius: min(width, height) * 0.16,
-                     alpha: 0.85)
+        drawCharacterMark(in: context,
+                          centre: CGPoint(x: centre.x, y: centre.y - height * 0.02),
+                          radius: min(width, height) * 0.20,
+                          alpha: 0.92)
     }
 
     // MARK: Windshield
@@ -1702,60 +2110,135 @@ private struct SpaceshipCockpit: View {
     }
 
     private func drawNebula(in context: GraphicsContext, window: CGRect) {
-        var glow = context
-        glow.blendMode = .plusLighter
-        let origin = CGPoint(x: window.minX + window.width * 0.30,
-                             y: window.minY + window.height * 0.40)
-        let violet = Color(red: 0.56, green: 0.28, blue: 1.00)
-        let magenta = Color(red: 0.96, green: 0.34, blue: 0.78)
-        let pink = Color(red: 1.00, green: 0.64, blue: 0.88)
-        let coreRadius = window.height * 0.18
-        glow.fill(Path(ellipseIn: CGRect(x: origin.x - coreRadius,
-                                         y: origin.y - coreRadius * 0.70,
-                                         width: coreRadius * 2,
-                                         height: coreRadius * 1.40)),
-                  with: .radialGradient(Gradient(colors: [.white.opacity(0.62),
-                                                          pink.opacity(0.42),
-                                                          violet.opacity(0)]),
-                                        center: origin,
-                                        startRadius: 0,
-                                        endRadius: coreRadius))
+        let violet = Color(red: 0.48, green: 0.20, blue: 0.98)
+        let fuchsia = Color(red: 0.92, green: 0.24, blue: 0.78)
+        let ice = Color(red: 0.70, green: 0.82, blue: 1.00)
+        let origin = CGPoint(x: window.minX + window.width * 0.27,
+                             y: window.minY + window.height * 0.37)
 
-        for arm in 0..<2 {
-            let armOffset = Double(arm) * .pi
-            for index in 0..<68 {
-                let t = CGFloat(index) / 67
-                let angle = armOffset + Double(t) * .pi * 3.35
-                let radius = window.height * (0.02 + pow(t, 0.82) * 0.48)
-                let x = origin.x + CGFloat(cos(angle)) * radius * 1.28
-                let y = origin.y + CGFloat(sin(angle)) * radius * 0.68
-                let blob = window.height * (0.06 * (1 - t * 0.6) + 0.012)
-                let color: Color = t < 0.22 ? pink : (index.isMultiple(of: 2) ? magenta : violet)
-                let alpha = 0.24 * (1 - Double(t) * 0.4)
-                glow.fill(Path(ellipseIn: CGRect(x: x - blob, y: y - blob,
-                                                 width: blob * 2, height: blob * 2)),
-                          with: .radialGradient(Gradient(colors: [color.opacity(alpha), color.opacity(0)]),
-                                                center: CGPoint(x: x, y: y),
-                                                startRadius: 0,
-                                                endRadius: blob))
-            }
+        // The nebula is built from long, blurred ribbons instead of a cloud of
+        // circles. That gives it a recognisable current and keeps it from
+        // reading as one undefined purple object behind the gameplay.
+        var upperRibbon = Path()
+        upperRibbon.move(to: CGPoint(x: window.minX - window.width * 0.08,
+                                     y: window.minY + window.height * 0.61))
+        upperRibbon.addCurve(to: CGPoint(x: window.minX + window.width * 0.42,
+                                         y: window.minY + window.height * 0.28),
+                             control1: CGPoint(x: window.minX + window.width * 0.08,
+                                               y: window.minY + window.height * 0.60),
+                             control2: CGPoint(x: window.minX + window.width * 0.19,
+                                               y: window.minY + window.height * 0.22))
+        upperRibbon.addCurve(to: CGPoint(x: window.minX + window.width * 0.78,
+                                         y: window.minY + window.height * 0.16),
+                             control1: CGPoint(x: window.minX + window.width * 0.56,
+                                               y: window.minY + window.height * 0.34),
+                             control2: CGPoint(x: window.minX + window.width * 0.66,
+                                               y: window.minY + window.height * 0.12))
+
+        var lowerRibbon = Path()
+        lowerRibbon.move(to: CGPoint(x: window.minX - window.width * 0.10,
+                                     y: window.minY + window.height * 0.78))
+        lowerRibbon.addCurve(to: CGPoint(x: window.minX + window.width * 0.36,
+                                         y: window.minY + window.height * 0.43),
+                             control1: CGPoint(x: window.minX + window.width * 0.08,
+                                               y: window.minY + window.height * 0.72),
+                             control2: CGPoint(x: window.minX + window.width * 0.14,
+                                               y: window.minY + window.height * 0.36))
+        lowerRibbon.addCurve(to: CGPoint(x: window.minX + window.width * 0.72,
+                                         y: window.minY + window.height * 0.34),
+                             control1: CGPoint(x: window.minX + window.width * 0.50,
+                                               y: window.minY + window.height * 0.55),
+                             control2: CGPoint(x: window.minX + window.width * 0.61,
+                                               y: window.minY + window.height * 0.27))
+
+        context.drawLayer { haze in
+            haze.blendMode = .plusLighter
+            haze.addFilter(.blur(radius: window.height * 0.035))
+            haze.stroke(upperRibbon,
+                        with: .linearGradient(Gradient(colors: [violet.opacity(0),
+                                                                 violet.opacity(0.34),
+                                                                 fuchsia.opacity(0.25),
+                                                                 ice.opacity(0)]),
+                                              startPoint: CGPoint(x: window.minX, y: origin.y),
+                                              endPoint: CGPoint(x: window.maxX, y: origin.y)),
+                        style: StrokeStyle(lineWidth: window.height * 0.18,
+                                           lineCap: .round,
+                                           lineJoin: .round))
+            haze.stroke(lowerRibbon,
+                        with: .linearGradient(Gradient(colors: [fuchsia.opacity(0),
+                                                                 fuchsia.opacity(0.24),
+                                                                 violet.opacity(0.28),
+                                                                 violet.opacity(0)]),
+                                              startPoint: CGPoint(x: window.minX, y: origin.y),
+                                              endPoint: CGPoint(x: window.maxX, y: origin.y)),
+                        style: StrokeStyle(lineWidth: window.height * 0.13,
+                                           lineCap: .round,
+                                           lineJoin: .round))
         }
 
-        let dust = Color(red: 0.92, green: 0.88, blue: 1.00)
-        for index in 0..<200 {
-            let arm = index.isMultiple(of: 2) ? 0.0 : Double.pi
+        context.drawLayer { filaments in
+            filaments.blendMode = .plusLighter
+            filaments.addFilter(.blur(radius: window.height * 0.010))
+            filaments.stroke(upperRibbon,
+                             with: .linearGradient(Gradient(colors: [violet.opacity(0),
+                                                                      ice.opacity(0.22),
+                                                                      fuchsia.opacity(0.34),
+                                                                      violet.opacity(0)]),
+                                                   startPoint: CGPoint(x: window.minX, y: origin.y),
+                                                   endPoint: CGPoint(x: window.maxX, y: origin.y)),
+                             style: StrokeStyle(lineWidth: window.height * 0.032,
+                                                lineCap: .round,
+                                                lineJoin: .round))
+            filaments.stroke(lowerRibbon,
+                             with: .color(violet.opacity(0.23)),
+                             style: StrokeStyle(lineWidth: window.height * 0.022,
+                                                lineCap: .round,
+                                                lineJoin: .round))
+        }
+
+        // A dark seam provides contrast and makes the coloured gas feel
+        // layered instead of uniformly luminous.
+        var dustLane = context
+        dustLane.blendMode = .multiply
+        dustLane.stroke(upperRibbon,
+                        with: .color(Color(red: 0.02, green: 0.01, blue: 0.10).opacity(0.46)),
+                        style: StrokeStyle(lineWidth: window.height * 0.018,
+                                           lineCap: .round,
+                                           lineJoin: .round))
+
+        var core = context
+        core.blendMode = .plusLighter
+        let coreRadius = window.height * 0.15
+        core.fill(Path(ellipseIn: CGRect(x: origin.x - coreRadius,
+                                         y: origin.y - coreRadius * 0.62,
+                                         width: coreRadius * 2,
+                                         height: coreRadius * 1.24)),
+                  with: .radialGradient(Gradient(stops: [
+                    .init(color: .white.opacity(0.62), location: 0),
+                    .init(color: ice.opacity(0.26), location: 0.20),
+                    .init(color: fuchsia.opacity(0.20), location: 0.48),
+                    .init(color: violet.opacity(0), location: 1)
+                  ]),
+                  center: origin,
+                  startRadius: 0,
+                  endRadius: coreRadius))
+
+        // Dust follows the same two currents, with dense grains near the core
+        // and sparse blue-violet grains at the tips.
+        let dust = Color(red: 0.91, green: 0.92, blue: 1.00)
+        for index in 0..<190 {
             let t = random(index, 11)
-            let angle = arm + Double(t) * .pi * 3.35
-            let radius = window.height * (0.02 + pow(t, 0.88) * 0.48)
-            let spread = (random(index, 12) - 0.5) * window.height * 0.055 * (0.35 + t)
-            let x = origin.x + CGFloat(cos(angle)) * radius * 1.28
-                + CGFloat(cos(angle + .pi / 2)) * spread
-            let y = origin.y + CGFloat(sin(angle)) * radius * 0.68
-                + CGFloat(sin(angle + .pi / 2)) * spread * 0.65
-            let dot = 0.4 + random(index, 14) * 1.2
-            glow.fill(Path(ellipseIn: CGRect(x: x - dot / 2, y: y - dot / 2,
+            let branch = index.isMultiple(of: 2) ? -1.0 : 1.0
+            let x = window.minX + window.width * (-0.04 + t * 0.80)
+            let wave = sin(Double(t) * .pi * 2.15 + branch * 0.55)
+            let centreY = window.minY + window.height * (0.50 - t * 0.34 + CGFloat(wave) * 0.10)
+            let spread = (random(index, 12) - 0.5) * window.height * (0.05 + t * 0.08)
+            let y = centreY + spread * CGFloat(branch)
+            let dot = 0.35 + random(index, 14) * (isPad ? 1.45 : 1.05)
+            let tint = index.isMultiple(of: 6) ? ice : dust
+            core.fill(Path(ellipseIn: CGRect(x: x - dot / 2, y: y - dot / 2,
                                              width: dot, height: dot)),
-                      with: .color(dust.opacity(0.28 + Double(random(index, 15)) * 0.6)))
+                      with: .color(tint.opacity(0.20 + Double(random(index, 15)) * 0.58)))
         }
     }
 
@@ -1798,48 +2281,110 @@ private struct SpaceshipCockpit: View {
     private func drawAsteroids(in context: GraphicsContext,
                                window: CGRect,
                                time: TimeInterval) {
-        for index in 0..<11 {
-            let depth = 0.35 + random(index, 71) * 0.65
-            let travel = CGFloat(time) * (0.0025 + depth * 0.0035)
+        for index in 0..<9 {
+            let depth = 0.28 + random(index, 71) * 0.72
+            let direction: CGFloat = index.isMultiple(of: 4) ? -1 : 1
+            let travel = CGFloat(time) * (0.0022 + depth * 0.0042) * direction
             let x = window.minX + wrap(random(index, 72) + travel) * window.width
-            let y = window.minY + (0.12 + random(index, 73) * 0.70) * window.height
-            let radius = window.height * (0.010 + depth * 0.022)
-            let rotation = CGFloat(time) * (0.05 + random(index, 74) * 0.09)
+            let baseY = window.minY + (0.10 + random(index, 73) * 0.73) * window.height
+            let y = baseY + sin(time * (0.18 + Double(depth) * 0.15) + Double(index)) * window.height * 0.008
+            let radius = window.height * (0.009 + pow(depth, 1.7) * 0.030)
+            let rotationDirection: CGFloat = index.isMultiple(of: 2) ? -1 : 1
+            let rotation = CGFloat(time) * (0.035 + random(index, 74) * 0.075) * rotationDirection
+            let squash = 0.76 + random(index, 70) * 0.38
+
+            var points: [CGPoint] = []
+            for vertex in 0..<10 {
+                let angle = CGFloat(vertex) / 10 * .pi * 2 + rotation
+                let variance = 0.72 + random(index * 10 + vertex, 75) * 0.38
+                points.append(CGPoint(x: x + cos(angle) * radius * variance,
+                                      y: y + sin(angle) * radius * variance * squash))
+            }
 
             var rock = Path()
-            for vertex in 0..<9 {
-                let angle = CGFloat(vertex) / 9 * .pi * 2 + rotation
-                let variance = 0.76 + random(index * 9 + vertex, 75) * 0.30
-                let point = CGPoint(x: x + cos(angle) * radius * variance,
-                                    y: y + sin(angle) * radius * variance)
-                if vertex == 0 {
-                    rock.move(to: point)
-                } else {
-                    rock.addLine(to: point)
-                }
+            for (vertex, point) in points.enumerated() {
+                vertex == 0 ? rock.move(to: point) : rock.addLine(to: point)
             }
             rock.closeSubpath()
 
-            context.fill(rock,
-                         with: .linearGradient(Gradient(colors: [Color(red: 0.55, green: 0.58, blue: 0.70),
-                                                                  Color(red: 0.22, green: 0.24, blue: 0.34),
-                                                                  Color(red: 0.05, green: 0.05, blue: 0.10)]),
-                                               startPoint: CGPoint(x: x - radius, y: y - radius),
-                                               endPoint: CGPoint(x: x + radius, y: y + radius)))
-            context.stroke(rock, with: .color(.white.opacity(0.18 * Double(depth))), lineWidth: depth > 0.7 ? 1.1 : 0.6)
-            if depth < 0.55 {
-                context.stroke(rock, with: .color(cyan.opacity(0.12)), lineWidth: 0.6)
+            if depth > 0.72 {
+                var halo = context
+                halo.blendMode = .plusLighter
+                halo.addFilter(.blur(radius: radius * 0.20))
+                halo.stroke(rock, with: .color(cyan.opacity(0.08)), lineWidth: radius * 0.24)
             }
 
-            for crater in 0..<2 {
-                let craterRadius = radius * (0.13 + random(index * 3 + crater, 77) * 0.12)
-                let craterPoint = CGPoint(x: x + (random(index * 4 + crater, 78) - 0.5) * radius,
-                                          y: y + (random(index * 5 + crater, 79) - 0.5) * radius)
-                context.fill(Path(ellipseIn: CGRect(x: craterPoint.x - craterRadius,
-                                                     y: craterPoint.y - craterRadius,
-                                                     width: craterRadius * 2,
-                                                     height: craterRadius * 2)),
-                             with: .color(.black.opacity(0.30)))
+            context.fill(rock,
+                         with: .linearGradient(Gradient(stops: [
+                            .init(color: Color(red: 0.62, green: 0.64, blue: 0.70), location: 0),
+                            .init(color: Color(red: 0.25, green: 0.25, blue: 0.31), location: 0.46),
+                            .init(color: Color(red: 0.045, green: 0.04, blue: 0.075), location: 1)
+                         ]),
+                         startPoint: CGPoint(x: x - radius * 0.75, y: y - radius),
+                         endPoint: CGPoint(x: x + radius, y: y + radius)))
+
+            // Broad mineral facets break up the computer-perfect polygon and
+            // stay legible even on the smaller iPhone playfield.
+            for facet in 0..<4 {
+                let first = (facet * 2 + index) % points.count
+                let second = (first + 1 + facet % 2) % points.count
+                var face = Path()
+                face.move(to: CGPoint(x: x + (random(index + facet, 90) - 0.5) * radius * 0.20,
+                                      y: y + (random(index + facet, 91) - 0.5) * radius * 0.16))
+                face.addLine(to: points[first])
+                face.addLine(to: points[second])
+                face.closeSubpath()
+                let facetColor = facet.isMultiple(of: 2)
+                    ? Color.white.opacity(0.055 + Double(depth) * 0.04)
+                    : Color(red: 0.18, green: 0.15, blue: 0.25).opacity(0.22)
+                context.fill(face, with: .color(facetColor))
+            }
+
+            var litRim = Path()
+            litRim.move(to: points[6])
+            for vertex in 7..<10 { litRim.addLine(to: points[vertex]) }
+            litRim.addLine(to: points[0])
+            context.stroke(litRim,
+                           with: .color(Color(red: 0.78, green: 0.82, blue: 0.92)
+                            .opacity(0.22 + Double(depth) * 0.20)),
+                           lineWidth: depth > 0.7 ? 1.35 : 0.75)
+            context.stroke(rock, with: .color(.black.opacity(0.55)), lineWidth: depth > 0.7 ? 1.1 : 0.65)
+
+            let craterCount = depth > 0.62 ? 3 : 2
+            for crater in 0..<craterCount {
+                let craterRadius = radius * (0.12 + random(index * 3 + crater, 77) * 0.13)
+                let craterPoint = CGPoint(x: x + (random(index * 5 + crater, 78) - 0.54) * radius * 0.82,
+                                          y: y + (random(index * 7 + crater, 79) - 0.52) * radius * 0.64)
+                let craterRect = CGRect(x: craterPoint.x - craterRadius,
+                                        y: craterPoint.y - craterRadius * 0.66,
+                                        width: craterRadius * 2,
+                                        height: craterRadius * 1.32)
+                context.fill(Path(ellipseIn: craterRect),
+                             with: .radialGradient(Gradient(colors: [Color.black.opacity(0.48),
+                                                                      Color.black.opacity(0.12)]),
+                                                   center: CGPoint(x: craterPoint.x + craterRadius * 0.18,
+                                                                   y: craterPoint.y + craterRadius * 0.12),
+                                                   startRadius: 0,
+                                                   endRadius: craterRadius))
+                context.stroke(Path(ellipseIn: craterRect.offsetBy(dx: -craterRadius * 0.08,
+                                                                   dy: -craterRadius * 0.08)),
+                               with: .color(.white.opacity(0.12 + Double(depth) * 0.06)),
+                               lineWidth: max(0.45, radius * 0.035))
+            }
+
+            // Close foreground rocks shed a few tiny fragments in the opposite
+            // direction of travel, reinforcing speed without adding streaks.
+            if depth > 0.76 {
+                for fragment in 0..<3 {
+                    let gap = radius * (1.30 + CGFloat(fragment) * 0.42)
+                    let fx = x - gap * direction
+                    let fy = y + (random(index * 3 + fragment, 96) - 0.5) * radius
+                    let dot = radius * (0.055 + random(fragment, 97) * 0.045)
+                    context.fill(Path(ellipseIn: CGRect(x: fx - dot, y: fy - dot,
+                                                        width: dot * 2, height: dot * 2)),
+                                 with: .color(Color(red: 0.55, green: 0.57, blue: 0.66)
+                                    .opacity(0.25 + Double(depth) * 0.25)))
+                }
             }
         }
     }
@@ -1869,6 +2414,32 @@ private struct SpaceshipCockpit: View {
         glow.stroke(Path(ellipseIn: disc.insetBy(dx: -radius * 0.025, dy: -radius * 0.025)),
                     with: .color(cyan.opacity(0.07 + 0.04 * sin(time * 1.3))),
                     lineWidth: isPad ? 10 : 7)
+
+        // Warm lights are grouped around the visible land masses. A slow,
+        // offset pulse makes them feel like living places rather than a dotted
+        // decorative ring pasted over the planet.
+        let hubs = [CGPoint(x: -0.42, y: -0.46),
+                    CGPoint(x: -0.18, y: -0.57),
+                    CGPoint(x: 0.02, y: -0.44),
+                    CGPoint(x: -0.20, y: -0.18),
+                    CGPoint(x: -0.53, y: 0.05)]
+        context.drawLayer { lights in
+            lights.clip(to: Path(ellipseIn: disc))
+            lights.blendMode = .plusLighter
+            for index in 0..<34 {
+                let hub = hubs[index % hubs.count]
+                let px = centre.x + (hub.x + (random(index, 101) - 0.5) * 0.20) * radius
+                let py = centre.y + (hub.y + (random(index, 102) - 0.5) * 0.13) * radius
+                let pulse = 0.38 + 0.34 * (0.5 + 0.5 * sin(time * (0.75 + Double(random(index, 103))) + Double(index)))
+                let dot = (isPad ? 1.05 : 0.75) + random(index, 104) * (isPad ? 1.25 : 0.90)
+                let lightColor = index.isMultiple(of: 5)
+                    ? Color(red: 1.00, green: 0.93, blue: 0.72)
+                    : Color(red: 1.00, green: 0.64, blue: 0.25)
+                lights.fill(Path(ellipseIn: CGRect(x: px - dot / 2, y: py - dot / 2,
+                                                   width: dot, height: dot)),
+                            with: .color(lightColor.opacity(pulse)))
+            }
+        }
     }
 
     private func drawPlatformPulse(in context: GraphicsContext,
@@ -1878,7 +2449,7 @@ private struct SpaceshipCockpit: View {
         let width = min(size.width * 0.40, layout.windowRect.width * 0.62)
         let height = min(width * 0.30, floorDepth * 1.5)
         let pad = CGRect(x: size.width / 2 - width / 2,
-                         y: size.height - height * 0.62,
+                         y: size.height - height * 0.76,
                          width: width,
                          height: height)
         let ring = pad.insetBy(dx: width * 0.13, dy: height * 0.13)
@@ -1917,9 +2488,9 @@ private struct SpaceshipCockpit: View {
 
         context.fill(planet,
                      with: .radialGradient(Gradient(colors: [Color(red: 0.42, green: 0.66, blue: 1.00),
-                                                             Color(red: 0.10, green: 0.36, blue: 0.86),
-                                                             Color(red: 0.03, green: 0.14, blue: 0.46),
-                                                             Color(red: 0.01, green: 0.04, blue: 0.16)]),
+                                                             Color(red: 0.06, green: 0.36, blue: 0.73),
+                                                             Color(red: 0.015, green: 0.15, blue: 0.38),
+                                                             Color(red: 0.005, green: 0.025, blue: 0.10)]),
                                            center: CGPoint(x: centre.x - radius * 0.45,
                                                            y: centre.y - radius * 0.55),
                                            startRadius: 0,
@@ -1927,52 +2498,181 @@ private struct SpaceshipCockpit: View {
 
         context.drawLayer { surface in
             surface.clip(to: planet)
-            let spin = CGFloat(time) * 0.0035
-            let land = Color(red: 0.70, green: 0.76, blue: 0.90)
-            for index in 0..<46 {
-                let x = disc.minX + (wrap(random(index, 21) + spin) * 1.3 - 0.15) * disc.width
-                let y = disc.minY + random(index, 22) * disc.height
-                let width = radius * (0.10 + random(index, 23) * 0.26)
-                let height = width * (0.35 + random(index, 24) * 0.35)
-                surface.fill(Path(ellipseIn: CGRect(x: x - width / 2, y: y - height / 2,
-                                                    width: width, height: height)),
-                             with: .color(land.opacity(0.10 + Double(random(index, 25)) * 0.22)))
+
+            func earthPoint(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                CGPoint(x: centre.x + x * radius, y: centre.y + y * radius)
             }
-            for index in 0..<22 {
-                let x = disc.minX + (wrap(random(index, 31) + spin * 1.4) * 1.6 - 0.3) * disc.width
-                let y = disc.minY + random(index, 32) * disc.height
-                let width = radius * (0.30 + random(index, 33) * 0.30)
-                let height = radius * (0.03 + random(index, 34) * 0.03)
-                surface.fill(Path(roundedRect: CGRect(x: x - width / 2, y: y - height / 2,
-                                                      width: width, height: height),
-                                  cornerRadius: height / 2),
-                             with: .color(.white.opacity(0.12 + Double(random(index, 35)) * 0.16)))
+
+            // Stylised but coherent coastlines. Large, joined masses read as a
+            // planet at a glance; the old collection of random ellipses looked
+            // like spots sitting on top of a blue ball.
+            var north = Path()
+            north.move(to: earthPoint(-0.93, -0.63))
+            north.addCurve(to: earthPoint(-0.62, -0.83),
+                           control1: earthPoint(-0.86, -0.79),
+                           control2: earthPoint(-0.73, -0.88))
+            north.addCurve(to: earthPoint(-0.33, -0.73),
+                           control1: earthPoint(-0.52, -0.80),
+                           control2: earthPoint(-0.43, -0.69))
+            north.addLine(to: earthPoint(-0.17, -0.56))
+            north.addLine(to: earthPoint(-0.26, -0.42))
+            north.addLine(to: earthPoint(-0.45, -0.39))
+            north.addLine(to: earthPoint(-0.52, -0.22))
+            north.addLine(to: earthPoint(-0.72, -0.30))
+            north.addLine(to: earthPoint(-0.82, -0.45))
+            north.closeSubpath()
+
+            var europeAfrica = Path()
+            europeAfrica.move(to: earthPoint(-0.36, -0.64))
+            europeAfrica.addCurve(to: earthPoint(0.02, -0.71),
+                                  control1: earthPoint(-0.23, -0.76),
+                                  control2: earthPoint(-0.08, -0.65))
+            europeAfrica.addLine(to: earthPoint(0.25, -0.55))
+            europeAfrica.addLine(to: earthPoint(0.18, -0.40))
+            europeAfrica.addLine(to: earthPoint(0.05, -0.34))
+            europeAfrica.addCurve(to: earthPoint(-0.03, 0.20),
+                                  control1: earthPoint(0.16, -0.08),
+                                  control2: earthPoint(0.10, 0.10))
+            europeAfrica.addLine(to: earthPoint(-0.22, 0.47))
+            europeAfrica.addLine(to: earthPoint(-0.35, 0.19))
+            europeAfrica.addLine(to: earthPoint(-0.43, -0.10))
+            europeAfrica.addLine(to: earthPoint(-0.56, -0.27))
+            europeAfrica.addLine(to: earthPoint(-0.45, -0.43))
+            europeAfrica.closeSubpath()
+
+            var south = Path()
+            south.move(to: earthPoint(-0.70, -0.20))
+            south.addCurve(to: earthPoint(-0.46, -0.12),
+                           control1: earthPoint(-0.62, -0.28),
+                           control2: earthPoint(-0.52, -0.23))
+            south.addLine(to: earthPoint(-0.38, 0.06))
+            south.addLine(to: earthPoint(-0.47, 0.30))
+            south.addLine(to: earthPoint(-0.54, 0.61))
+            south.addLine(to: earthPoint(-0.68, 0.74))
+            south.addLine(to: earthPoint(-0.72, 0.44))
+            south.addLine(to: earthPoint(-0.81, 0.19))
+            south.addLine(to: earthPoint(-0.84, -0.03))
+            south.closeSubpath()
+
+            var asia = Path()
+            asia.move(to: earthPoint(0.02, -0.72))
+            asia.addCurve(to: earthPoint(0.72, -0.58),
+                          control1: earthPoint(0.26, -0.84),
+                          control2: earthPoint(0.53, -0.72))
+            asia.addLine(to: earthPoint(0.86, -0.39))
+            asia.addLine(to: earthPoint(0.64, -0.25))
+            asia.addLine(to: earthPoint(0.44, -0.34))
+            asia.addLine(to: earthPoint(0.30, -0.18))
+            asia.addLine(to: earthPoint(0.15, -0.38))
+            asia.addLine(to: earthPoint(-0.02, -0.47))
+            asia.closeSubpath()
+
+            let landMasses = [north, europeAfrica, south, asia]
+            let landLight = Color(red: 0.42, green: 0.63, blue: 0.53)
+            let landMid = Color(red: 0.17, green: 0.38, blue: 0.31)
+            let landDark = Color(red: 0.075, green: 0.18, blue: 0.20)
+            for (index, land) in landMasses.enumerated() {
+                surface.fill(land,
+                             with: .linearGradient(Gradient(colors: [landLight.opacity(index == 0 ? 0.92 : 0.82),
+                                                                      landMid.opacity(0.94),
+                                                                      landDark.opacity(0.98)]),
+                                                   startPoint: earthPoint(-0.65, -0.82),
+                                                   endPoint: earthPoint(0.50, 0.55)))
+                surface.stroke(land,
+                               with: .color(Color(red: 0.72, green: 0.87, blue: 0.74).opacity(0.24)),
+                               lineWidth: max(0.7, radius * 0.006))
             }
-            let city = Color(red: 1.00, green: 0.78, blue: 0.42)
-            for index in 0..<120 {
-                let t = Double(random(index, 41))
-                let angle = -.pi * 0.08 - t * .pi * 0.95
-                let ring: CGFloat = 0.74 + random(index, 42) * 0.22
-                let x = centre.x + CGFloat(cos(angle)) * radius * ring
-                let y = centre.y + CGFloat(sin(angle)) * radius * ring
-                let dot: CGFloat = 0.7 + random(index, 43) * (isPad ? 2.1 : 1.5)
-                surface.fill(Path(ellipseIn: CGRect(x: x - dot / 2, y: y - dot / 2,
-                                                    width: dot, height: dot * 0.72)),
-                             with: .color(city.opacity(0.35 + Double(random(index, 45)) * 0.6)))
+
+            // Mountain and desert colour variation remains clipped inside the
+            // coastlines so it enriches the land without creating new blobs.
+            surface.drawLayer { terrain in
+                terrain.clip(to: europeAfrica)
+                terrain.fill(Path(ellipseIn: CGRect(x: earthPoint(-0.27, -0.11).x - radius * 0.18,
+                                                     y: earthPoint(-0.27, -0.11).y - radius * 0.09,
+                                                     width: radius * 0.36,
+                                                     height: radius * 0.18)),
+                             with: .color(Color(red: 0.76, green: 0.56, blue: 0.28).opacity(0.44)))
+                var ridge = Path()
+                ridge.move(to: earthPoint(-0.40, -0.48))
+                ridge.addCurve(to: earthPoint(-0.03, -0.40),
+                               control1: earthPoint(-0.27, -0.57),
+                               control2: earthPoint(-0.15, -0.35))
+                terrain.stroke(ridge,
+                               with: .color(Color(red: 0.79, green: 0.76, blue: 0.62).opacity(0.38)),
+                               lineWidth: radius * 0.025)
             }
+
+            surface.drawLayer { terrain in
+                terrain.clip(to: south)
+                var ridge = Path()
+                ridge.move(to: earthPoint(-0.71, -0.05))
+                ridge.addCurve(to: earthPoint(-0.61, 0.61),
+                               control1: earthPoint(-0.64, 0.15),
+                               control2: earthPoint(-0.67, 0.43))
+                terrain.stroke(ridge,
+                               with: .color(Color(red: 0.68, green: 0.62, blue: 0.44).opacity(0.42)),
+                               lineWidth: radius * 0.022)
+            }
+
+            // A single directional terminator makes the sphere dimensional.
+            // It is laid over the terrain but under clouds and city lights.
             surface.fill(planet,
                          with: .radialGradient(Gradient(stops: [
-                            .init(color: .clear, location: 0.45),
-                            .init(color: .black.opacity(0.55), location: 1)
+                            .init(color: .clear, location: 0.38),
+                            .init(color: .black.opacity(0.18), location: 0.67),
+                            .init(color: .black.opacity(0.72), location: 1)
                          ]),
                          center: CGPoint(x: centre.x - radius * 0.35, y: centre.y - radius * 0.45),
                          startRadius: 0,
                          endRadius: radius * 1.6))
+
+            // Cloud bands follow curved weather systems rather than sitting on
+            // the globe as identical horizontal capsules.
+            surface.drawLayer { clouds in
+                clouds.blendMode = .plusLighter
+                clouds.addFilter(.blur(radius: max(0.8, radius * 0.009)))
+                for index in 0..<9 {
+                    let t = CGFloat(index) / 8
+                    let bandY = -0.70 + t * 1.22
+                    let startX = -0.86 + random(index, 31) * 0.20
+                    let endX = 0.72 - random(index, 32) * 0.18
+                    var band = Path()
+                    band.move(to: earthPoint(startX, bandY))
+                    band.addCurve(to: earthPoint(endX, bandY + (random(index, 33) - 0.5) * 0.16),
+                                  control1: earthPoint(-0.38, bandY - 0.13 + random(index, 34) * 0.10),
+                                  control2: earthPoint(0.18, bandY + 0.12 - random(index, 35) * 0.10))
+                    clouds.stroke(band,
+                                  with: .color(.white.opacity(0.085 + Double(random(index, 36)) * 0.10)),
+                                  style: StrokeStyle(lineWidth: radius * (0.018 + random(index, 37) * 0.018),
+                                                     lineCap: .round))
+                }
+            }
+
+            let cityHubs = [CGPoint(x: -0.43, y: -0.47),
+                            CGPoint(x: -0.17, y: -0.57),
+                            CGPoint(x: 0.02, y: -0.45),
+                            CGPoint(x: -0.20, y: -0.17),
+                            CGPoint(x: -0.54, y: 0.04)]
+            var cityGlow = surface
+            cityGlow.blendMode = .plusLighter
+            for index in 0..<74 {
+                let hub = cityHubs[index % cityHubs.count]
+                let x = centre.x + (hub.x + (random(index, 41) - 0.5) * 0.22) * radius
+                let y = centre.y + (hub.y + (random(index, 42) - 0.5) * 0.14) * radius
+                let dot = 0.55 + random(index, 43) * (isPad ? 1.45 : 1.05)
+                let color = index.isMultiple(of: 6)
+                    ? Color(red: 1.00, green: 0.94, blue: 0.76)
+                    : Color(red: 1.00, green: 0.66, blue: 0.28)
+                cityGlow.fill(Path(ellipseIn: CGRect(x: x - dot / 2, y: y - dot / 2,
+                                                     width: dot, height: dot)),
+                              with: .color(color.opacity(0.30 + Double(random(index, 45)) * 0.46)))
+            }
         }
 
-        glow.stroke(Path(ellipseIn: disc), with: .color(cyan.opacity(0.25)), lineWidth: isPad ? 10 : 7)
+        glow.stroke(Path(ellipseIn: disc), with: .color(cyan.opacity(0.23)), lineWidth: isPad ? 11 : 8)
         glow.stroke(Path(ellipseIn: disc.insetBy(dx: 1, dy: 1)),
-                    with: .color(cyan.opacity(0.85)), lineWidth: isPad ? 3 : 2)
+                    with: .color(Color(red: 0.63, green: 0.93, blue: 1.00).opacity(0.82)),
+                    lineWidth: isPad ? 3 : 2)
     }
 
     private func drawWindowFrame(in context: GraphicsContext, window: CGRect, cut: CGFloat) {
@@ -2098,41 +2798,231 @@ private struct SpaceshipCockpit: View {
         glow.stroke(neon, with: .color(cyan.opacity(pulse * 0.7)), lineWidth: isPad ? 6 : 4)
     }
 
-    private func drawLionMark(in context: GraphicsContext,
-                              centre: CGPoint,
-                              radius: CGFloat,
-                              alpha: Double) {
+    /// A bespoke vector hologram for every selectable character. Nothing here
+    /// is an image asset: the seal is assembled from paths, ellipses and light
+    /// strokes, so it remains crisp when the cockpit scales to another device.
+    private func drawCharacterMark(in context: GraphicsContext,
+                                   centre: CGPoint,
+                                   radius: CGFloat,
+                                   alpha: Double) {
         var glow = context
         glow.blendMode = .plusLighter
-        let line = max(1.1, radius * 0.10)
-        let head = CGRect(x: centre.x - radius * 0.70,
-                          y: centre.y - radius * 0.48,
-                          width: radius * 1.40,
-                          height: radius * 1.20)
-        glow.stroke(Path(ellipseIn: head),
-                    with: .color(cyan.opacity(0.9 * alpha)),
-                    lineWidth: line)
-        for side in [-1.0, 1.0] as [CGFloat] {
-            let ear = CGRect(x: centre.x + side * radius * 0.38 - radius * 0.20,
-                             y: centre.y - radius * 0.92,
-                             width: radius * 0.40,
-                             height: radius * 0.46)
-            glow.stroke(Path(ellipseIn: ear),
-                        with: .color(cyan.opacity(0.75 * alpha)),
-                        lineWidth: line * 0.8)
-            let eye = CGRect(x: centre.x + side * radius * 0.24,
-                             y: centre.y - radius * 0.02,
-                             width: radius * 0.12,
-                             height: radius * 0.12)
-            glow.fill(Path(ellipseIn: eye), with: .color(.white.opacity(0.85 * alpha)))
+        let accent = character.color
+        let line = max(1.0, radius * 0.085)
+
+        // Character identity sits inside an orbital badge shared by the fleet.
+        let orbitWide = CGRect(x: centre.x - radius * 1.22,
+                               y: centre.y - radius * 0.58,
+                               width: radius * 2.44,
+                               height: radius * 1.16)
+        let orbitTall = CGRect(x: centre.x - radius * 0.84,
+                               y: centre.y - radius * 0.92,
+                               width: radius * 1.68,
+                               height: radius * 1.84)
+        glow.stroke(Path(ellipseIn: orbitWide),
+                    with: .color(cyan.opacity(0.42 * alpha)),
+                    lineWidth: line * 0.45)
+        glow.stroke(Path(ellipseIn: orbitTall),
+                    with: .color(accent.opacity(0.35 * alpha)),
+                    lineWidth: line * 0.36)
+        for index in 0..<5 {
+            let angle = Double(index) / 5 * .pi * 2 - .pi / 2
+            let star = CGPoint(x: centre.x + cos(angle) * radius * 1.10,
+                               y: centre.y + sin(angle) * radius * 0.52)
+            let dot = max(1.2, radius * (index == 0 ? 0.075 : 0.045))
+            glow.fill(Path(ellipseIn: CGRect(x: star.x - dot, y: star.y - dot,
+                                             width: dot * 2, height: dot * 2)),
+                      with: .color((index.isMultiple(of: 2) ? accent : cyan)
+                        .opacity(0.88 * alpha)))
         }
-        var muzzle = Path()
-        muzzle.move(to: CGPoint(x: centre.x, y: centre.y + radius * 0.08))
-        muzzle.addLine(to: CGPoint(x: centre.x, y: centre.y + radius * 0.28))
-        muzzle.move(to: CGPoint(x: centre.x - radius * 0.18, y: centre.y + radius * 0.36))
-        muzzle.addQuadCurve(to: CGPoint(x: centre.x + radius * 0.18, y: centre.y + radius * 0.36),
-                            control: CGPoint(x: centre.x, y: centre.y + radius * 0.52))
-        glow.stroke(muzzle, with: .color(cyan.opacity(0.8 * alpha)), lineWidth: line * 0.7)
+
+        func ellipse(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> Path {
+            Path(ellipseIn: CGRect(x: centre.x + x * radius,
+                                   y: centre.y + y * radius,
+                                   width: width * radius,
+                                   height: height * radius))
+        }
+        func stroke(_ path: Path, color: Color = cyan, width: CGFloat = 1) {
+            glow.stroke(path,
+                        with: .color(color.opacity(0.92 * alpha)),
+                        style: StrokeStyle(lineWidth: line * width,
+                                           lineCap: .round,
+                                           lineJoin: .round))
+        }
+        func fill(_ path: Path, color: Color = cyan, opacity: Double = 0.30) {
+            glow.fill(path, with: .color(color.opacity(opacity * alpha)))
+        }
+
+        var face = Path()
+        switch character.id {
+        case "flying_penguin":
+            face = ellipse(-0.58, -0.63, 1.16, 1.30)
+            stroke(face, color: accent, width: 1.05)
+            var mask = Path()
+            mask.move(to: CGPoint(x: centre.x, y: centre.y - radius * 0.34))
+            mask.addCurve(to: CGPoint(x: centre.x - radius * 0.39, y: centre.y + radius * 0.20),
+                          control1: CGPoint(x: centre.x - radius * 0.10, y: centre.y - radius * 0.62),
+                          control2: CGPoint(x: centre.x - radius * 0.50, y: centre.y - radius * 0.13))
+            mask.move(to: CGPoint(x: centre.x, y: centre.y - radius * 0.34))
+            mask.addCurve(to: CGPoint(x: centre.x + radius * 0.39, y: centre.y + radius * 0.20),
+                          control1: CGPoint(x: centre.x + radius * 0.10, y: centre.y - radius * 0.62),
+                          control2: CGPoint(x: centre.x + radius * 0.50, y: centre.y - radius * 0.13))
+            stroke(mask, width: 0.68)
+            var beak = Path()
+            beak.move(to: CGPoint(x: centre.x, y: centre.y + radius * 0.04))
+            beak.addLine(to: CGPoint(x: centre.x + radius * 0.22, y: centre.y + radius * 0.17))
+            beak.addLine(to: CGPoint(x: centre.x, y: centre.y + radius * 0.27))
+            beak.addLine(to: CGPoint(x: centre.x - radius * 0.22, y: centre.y + radius * 0.17))
+            beak.closeSubpath()
+            fill(beak, color: accent, opacity: 0.72)
+            stroke(beak, color: accent, width: 0.55)
+
+        case "bunny":
+            let leftEar = ellipse(-0.49, -1.10, 0.36, 0.92)
+            let rightEar = ellipse(0.13, -1.10, 0.36, 0.92)
+            fill(leftEar, color: accent, opacity: 0.20)
+            fill(rightEar, color: accent, opacity: 0.20)
+            stroke(leftEar, color: accent)
+            stroke(rightEar, color: accent)
+            face = ellipse(-0.62, -0.54, 1.24, 1.18)
+            stroke(face, width: 1.05)
+
+        case "dog":
+            face = ellipse(-0.60, -0.58, 1.20, 1.18)
+            stroke(face, color: accent, width: 1.05)
+            var ears = Path()
+            ears.move(to: CGPoint(x: centre.x - radius * 0.42, y: centre.y - radius * 0.45))
+            ears.addQuadCurve(to: CGPoint(x: centre.x - radius * 0.82, y: centre.y + radius * 0.08),
+                              control: CGPoint(x: centre.x - radius * 0.90, y: centre.y - radius * 0.50))
+            ears.addQuadCurve(to: CGPoint(x: centre.x - radius * 0.50, y: centre.y + radius * 0.23),
+                              control: CGPoint(x: centre.x - radius * 0.66, y: centre.y + radius * 0.31))
+            ears.move(to: CGPoint(x: centre.x + radius * 0.42, y: centre.y - radius * 0.45))
+            ears.addQuadCurve(to: CGPoint(x: centre.x + radius * 0.82, y: centre.y + radius * 0.08),
+                              control: CGPoint(x: centre.x + radius * 0.90, y: centre.y - radius * 0.50))
+            ears.addQuadCurve(to: CGPoint(x: centre.x + radius * 0.50, y: centre.y + radius * 0.23),
+                              control: CGPoint(x: centre.x + radius * 0.66, y: centre.y + radius * 0.31))
+            stroke(ears, color: accent, width: 1.08)
+            stroke(ellipse(-0.34, 0.02, 0.68, 0.52), width: 0.55)
+
+        case "lion":
+            var mane = Path()
+            let points = 18
+            for index in 0...points {
+                let angle = Double(index) / Double(points) * .pi * 2 - .pi / 2
+                let spoke = index.isMultiple(of: 2) ? radius * 0.98 : radius * 0.76
+                let point = CGPoint(x: centre.x + cos(angle) * spoke,
+                                    y: centre.y + sin(angle) * spoke)
+                if index == 0 {
+                    mane.move(to: point)
+                } else {
+                    mane.addLine(to: point)
+                }
+            }
+            mane.closeSubpath()
+            fill(mane, color: accent, opacity: 0.20)
+            stroke(mane, color: accent, width: 0.88)
+            face = ellipse(-0.57, -0.54, 1.14, 1.20)
+            fill(face, color: cyan, opacity: 0.10)
+            stroke(face, width: 1.06)
+            stroke(ellipse(-0.52, -0.66, 0.36, 0.34), color: accent, width: 0.65)
+            stroke(ellipse(0.16, -0.66, 0.36, 0.34), color: accent, width: 0.65)
+
+        case "octopus":
+            var dome = Path()
+            dome.move(to: CGPoint(x: centre.x - radius * 0.64, y: centre.y + radius * 0.05))
+            dome.addQuadCurve(to: CGPoint(x: centre.x + radius * 0.64, y: centre.y + radius * 0.05),
+                              control: CGPoint(x: centre.x, y: centre.y - radius * 0.98))
+            stroke(dome, color: accent, width: 1.10)
+            for index in 0..<5 {
+                let x = (CGFloat(index) - 2) * radius * 0.27
+                var tentacle = Path()
+                tentacle.move(to: CGPoint(x: centre.x + x, y: centre.y + radius * 0.02))
+                tentacle.addCurve(to: CGPoint(x: centre.x + x + (index.isMultiple(of: 2) ? -1 : 1) * radius * 0.13,
+                                               y: centre.y + radius * 0.61),
+                                  control1: CGPoint(x: centre.x + x - radius * 0.11, y: centre.y + radius * 0.24),
+                                  control2: CGPoint(x: centre.x + x + radius * 0.14, y: centre.y + radius * 0.43))
+                stroke(tentacle, color: index.isMultiple(of: 2) ? accent : cyan, width: 0.78)
+            }
+
+        case "crab":
+            face = ellipse(-0.64, -0.38, 1.28, 0.86)
+            stroke(face, color: accent, width: 1.08)
+            for side in [-1.0, 1.0] as [CGFloat] {
+                var claw = Path()
+                claw.move(to: CGPoint(x: centre.x + side * radius * 0.55, y: centre.y - radius * 0.02))
+                claw.addQuadCurve(to: CGPoint(x: centre.x + side * radius * 0.98, y: centre.y - radius * 0.35),
+                                  control: CGPoint(x: centre.x + side * radius * 0.90, y: centre.y + radius * 0.10))
+                claw.addQuadCurve(to: CGPoint(x: centre.x + side * radius * 0.72, y: centre.y - radius * 0.56),
+                                  control: CGPoint(x: centre.x + side * radius * 1.02, y: centre.y - radius * 0.70))
+                stroke(claw, color: accent, width: 0.95)
+                stroke(ellipse(side < 0 ? -0.42 : 0.26, -0.64, 0.16, 0.30), width: 0.55)
+            }
+
+        case "elephant":
+            face = ellipse(-0.52, -0.62, 1.04, 1.13)
+            stroke(face, width: 1.05)
+            let leftEar = ellipse(-0.91, -0.48, 0.70, 0.91)
+            let rightEar = ellipse(0.21, -0.48, 0.70, 0.91)
+            fill(leftEar, color: accent, opacity: 0.19)
+            fill(rightEar, color: accent, opacity: 0.19)
+            stroke(leftEar, color: accent, width: 0.86)
+            stroke(rightEar, color: accent, width: 0.86)
+            var trunk = Path()
+            trunk.move(to: CGPoint(x: centre.x, y: centre.y + radius * 0.03))
+            trunk.addCurve(to: CGPoint(x: centre.x + radius * 0.22, y: centre.y + radius * 0.70),
+                           control1: CGPoint(x: centre.x - radius * 0.12, y: centre.y + radius * 0.34),
+                           control2: CGPoint(x: centre.x - radius * 0.08, y: centre.y + radius * 0.66))
+            stroke(trunk, color: accent, width: 1.0)
+
+        case "bear":
+            stroke(ellipse(-0.68, -0.76, 0.48, 0.48), color: accent, width: 0.85)
+            stroke(ellipse(0.20, -0.76, 0.48, 0.48), color: accent, width: 0.85)
+            face = ellipse(-0.64, -0.60, 1.28, 1.25)
+            stroke(face, width: 1.08)
+            stroke(ellipse(-0.34, 0.02, 0.68, 0.52), color: accent, width: 0.62)
+
+        case "fox":
+            var fox = Path()
+            fox.move(to: CGPoint(x: centre.x - radius * 0.72, y: centre.y - radius * 0.82))
+            fox.addLine(to: CGPoint(x: centre.x - radius * 0.52, y: centre.y + radius * 0.16))
+            fox.addQuadCurve(to: CGPoint(x: centre.x, y: centre.y + radius * 0.65),
+                             control: CGPoint(x: centre.x - radius * 0.34, y: centre.y + radius * 0.56))
+            fox.addQuadCurve(to: CGPoint(x: centre.x + radius * 0.52, y: centre.y + radius * 0.16),
+                             control: CGPoint(x: centre.x + radius * 0.34, y: centre.y + radius * 0.56))
+            fox.addLine(to: CGPoint(x: centre.x + radius * 0.72, y: centre.y - radius * 0.82))
+            fox.addLine(to: CGPoint(x: centre.x, y: centre.y - radius * 0.50))
+            fox.closeSubpath()
+            fill(fox, color: accent, opacity: 0.18)
+            stroke(fox, color: accent, width: 1.03)
+
+        default: // frog
+            face = ellipse(-0.72, -0.46, 1.44, 1.02)
+            stroke(face, color: accent, width: 1.05)
+            stroke(ellipse(-0.62, -0.78, 0.52, 0.52), color: accent, width: 0.90)
+            stroke(ellipse(0.10, -0.78, 0.52, 0.52), color: accent, width: 0.90)
+            var smile = Path()
+            smile.move(to: CGPoint(x: centre.x - radius * 0.40, y: centre.y + radius * 0.17))
+            smile.addQuadCurve(to: CGPoint(x: centre.x + radius * 0.40, y: centre.y + radius * 0.17),
+                               control: CGPoint(x: centre.x, y: centre.y + radius * 0.52))
+            stroke(smile, width: 0.62)
+        }
+
+        // Consistent luminous facial anchors keep even the more abstract marks
+        // friendly and legible at phone scale.
+        if character.id != "crab" {
+            for side in [-1.0, 1.0] as [CGFloat] {
+                let eye = ellipse(side < 0 ? -0.31 : 0.19, -0.17, 0.12, 0.12)
+                fill(eye, color: .white, opacity: 0.92)
+            }
+        }
+        if !["flying_penguin", "octopus", "crab", "elephant", "frog"].contains(character.id) {
+            var nose = Path()
+            nose.move(to: CGPoint(x: centre.x, y: centre.y + radius * 0.05))
+            nose.addLine(to: CGPoint(x: centre.x - radius * 0.10, y: centre.y + radius * 0.19))
+            nose.addLine(to: CGPoint(x: centre.x + radius * 0.10, y: centre.y + radius * 0.19))
+            nose.closeSubpath()
+            fill(nose, color: accent, opacity: 0.88)
+        }
     }
 
     // MARK: Helpers

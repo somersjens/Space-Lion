@@ -110,16 +110,22 @@ public final class QuestionGenerator {
     /// A question for a normal round.
     /// - Parameter requiredDistractors: how many wrong answers the current card
     ///   mode needs. The generator keeps trying until it can supply that many.
-    public func next(requiredDistractors: Int) -> MathQuestion {
-        generateValidated(requiredDistractors: requiredDistractors, forceTopLevel: false)
+    public func next(requiredDistractors: Int,
+                     avoiding forbidden: Set<AnswerValue> = []) -> MathQuestion {
+        generateValidated(requiredDistractors: requiredDistractors,
+                          forceTopLevel: false,
+                          avoiding: forbidden)
     }
 
     /// A harder question for the special double card: always drawn from the top
     /// of the available range rather than the weighted mix. Order and Random
     /// have no range to climb — the level's own number is all there is — so
     /// there it is simply the next question on the route.
-    public func nextHarder(requiredDistractors: Int) -> MathQuestion {
-        generateValidated(requiredDistractors: requiredDistractors, forceTopLevel: true)
+    public func nextHarder(requiredDistractors: Int,
+                           avoiding forbidden: Set<AnswerValue> = []) -> MathQuestion {
+        generateValidated(requiredDistractors: requiredDistractors,
+                          forceTopLevel: true,
+                          avoiding: forbidden)
     }
 
     /// Resets the anti-repeat memory for a fresh session.
@@ -173,15 +179,20 @@ public final class QuestionGenerator {
 
     // MARK: - Generation
 
-    private func generateValidated(requiredDistractors: Int, forceTopLevel: Bool) -> MathQuestion {
-        // Bounded retry: reject a repeat of the previous prompt, and any
-        // question that cannot supply enough genuinely-wrong distractors.
+    private func generateValidated(requiredDistractors: Int,
+                                   forceTopLevel: Bool,
+                                   avoiding forbidden: Set<AnswerValue>) -> MathQuestion {
+        // Bounded retry: reject a repeat of the previous prompt, an answer that
+        // is already on the board, and any question that cannot supply enough
+        // genuinely-wrong distractors.
+        let limit = forbidden.isEmpty ? 24 : 64
         var fallback: (question: MathQuestion, steps: Int)?
-        for attempt in 0..<24 {
+        for attempt in 0..<limit {
             // A rejected attempt walks the fixed route forward rather than
             // re-offering the sum that was just thrown away.
             let question = generate(forceTopLevel: forceTopLevel, stepOffset: attempt)
             guard question.isValid(requiredDistractors: requiredDistractors) else { continue }
+            if forbidden.contains(AnswerValue(question.correctAnswer)) { continue }
             fallback = (question, attempt + 1)
             let repeatsPrompt = question.prompt == lastPrompt
             let repeatsKind = question.kind == lastKind
@@ -194,7 +205,8 @@ public final class QuestionGenerator {
         // Every retry produced the same prompt (e.g. the table of 1 at card
         // mode 2). Hand back the last valid one rather than an invalid round.
         if let fallback { return record(fallback.question, steps: fallback.steps) }
-        return record(emergencyQuestion(), steps: 1)
+        if forbidden.isEmpty { return record(emergencyQuestion(), steps: 1) }
+        return record(emergencyDistinct(avoiding: forbidden), steps: 1)
     }
 
     private func record(_ question: MathQuestion, steps: Int) -> MathQuestion {
@@ -274,6 +286,77 @@ public final class QuestionGenerator {
         case .mixed:
             return supermixQuestion(step: step, forceTop: false)
         }
+    }
+
+    /// Last resort when the practised route cannot produce an answer that is
+    /// still free. Stays on the session's operation and walks outward until
+    /// the result is outside `forbidden`, so a block of six never has to reuse
+    /// a number that is already sitting on a button.
+    private func emergencyDistinct(avoiding forbidden: Set<AnswerValue>) -> MathQuestion {
+        let source = level.index
+        switch level.topic {
+        case .subtraction:
+            let take = max(1, source)
+            for extra in 1..<120 {
+                let left = take + extra
+                let answer = left - take
+                if forbidden.contains(AnswerValue("\(answer)")) { continue }
+                return build(prompt: "\(left) − \(take) = ?",
+                             answer: answer,
+                             wrong: [answer + 1, answer - 1, answer + 2, left],
+                             source: source,
+                             kind: .subtraction)
+            }
+        case .tables:
+            let table = max(1, source)
+            for multiplier in 1..<120 {
+                let answer = table * multiplier
+                if forbidden.contains(AnswerValue("\(answer)")) { continue }
+                return build(prompt: "\(table) × \(multiplier) = ?",
+                             answer: answer,
+                             wrong: [answer + table, answer + 1, answer - 1, table],
+                             source: source,
+                             kind: .multiplication)
+            }
+        case .fractions:
+            let denominator = max(2, MathScaling.fractionDenominator(source))
+            for factor in 1..<120 {
+                let answer = factor
+                if forbidden.contains(AnswerValue("\(answer)")) { continue }
+                let whole = denominator * factor
+                return build(prompt: "1/\(denominator) × \(whole) = ?",
+                             answer: answer,
+                             wrong: [answer + 1, answer - 1, whole, denominator],
+                             source: source,
+                             kind: .fraction)
+            }
+        case .percentages:
+            let percentage = max(1, MathScaling.percentage(source))
+            let base = Self.percentageBase(percentage)
+            for factor in 1..<160 {
+                let whole = base * factor
+                let answer = whole * percentage / 100
+                if forbidden.contains(AnswerValue("\(answer)")) { continue }
+                return build(prompt: "\(percentage)% × \(whole) = ?",
+                             answer: answer,
+                             wrong: [answer + 1, answer - 1, answer + base, whole],
+                             source: source,
+                             kind: .percentage)
+            }
+        case .addition, .mixed:
+            break
+        }
+        let add = max(1, level.topic == .mixed ? 2 : source)
+        for other in 1..<160 {
+            let answer = add + other
+            if forbidden.contains(AnswerValue("\(answer)")) { continue }
+            return build(prompt: "\(add) + \(other) = ?",
+                         answer: answer,
+                         wrong: [answer + 1, answer - 1, answer + 2, other],
+                         source: source,
+                         kind: .addition)
+        }
+        return emergencyQuestion()
     }
 
     /// Last-resort question, used only if every generator attempt failed
@@ -787,8 +870,8 @@ public final class QuestionGenerator {
                 distractors.append(candidate)
             }
         }
-        // Eight visible Space Lion buttons need seven genuinely different
-        // alternatives even at boundary values such as 100% or 1/2.
+        // The visible board only needs a handful of wrong answers, but boundary
+        // values such as 100% or 1/2 still have to pad out to a full set.
         if distractors.count < 12, answer.hasSuffix("%"),
            let percentage = Int(answer.dropLast()) {
             for delta in 1...100 {

@@ -190,12 +190,16 @@ public final class MemoryGame {
 
     // MARK: - Session lifecycle
 
-    /// Builds the first small question runway while the start/pause card is
-    /// still covering the playfield. The runway is replenished as play moves
-    /// forward, because a timed session is allowed to pass its board target.
+    /// Composes the session's question sequence while the start/pause card is
+    /// still covering the playfield, then deals the first few rounds. Later
+    /// rounds are taken from that same sequence; the clock can outlast the
+    /// first batch, and the factory extends the plan when it does.
     public func prepare(startingAt firstRound: Int = 1) {
         guard state == .intro, round == nil, preparedRounds.isEmpty else { return }
         let first = min(max(1, firstRound), maximumRounds)
+        let count = min(maximumRounds - first + 1,
+                        GameConfig.preparedSequenceLength(boardMaximum: board.maximum))
+        factory.prepareSequence(startingAt: first, count: count)
         appendPreparedRounds(startingAt: first)
     }
 

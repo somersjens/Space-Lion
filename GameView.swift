@@ -198,6 +198,16 @@ struct GameView: View {
         let topInset = max(screenInsets.top, isPad ? 24 : 16)
 
         return GeometryReader { proxy in
+            let topReserve = topInset + (isPad ? 112 : 78)
+            let cockpitMetrics = SpaceLionPlayfield.Metrics(
+                size: proxy.size,
+                topReserve: topReserve,
+                bottomReserve: screenInsets.bottom,
+                leftReserve: screenInsets.left,
+                rightReserve: screenInsets.right,
+                isPad: isPad
+            )
+            let hudInsets = cockpitMetrics.hudInsets(pauseWidth: hudControlSize)
             ZStack(alignment: .top) {
                 SpaceLionPlayfield(rounds: model.visibleRounds,
                               character: character,
@@ -210,7 +220,7 @@ struct GameView: View {
                               // The HUD's own height, so the swarm's ceiling is
                               // the underside of the HUD and never the status bar
                               // or the Dynamic Island behind it.
-                              topReserve: topInset + (isPad ? 112 : 78),
+                              topReserve: topReserve,
                               bottomReserve: screenInsets.bottom,
                               leftReserve: screenInsets.left,
                               rightReserve: screenInsets.right,
@@ -240,10 +250,11 @@ struct GameView: View {
 
                 hud
                     // In landscape the Dynamic Island lives in a horizontal
-                    // safe area. Respect both physical edges rather than only
-                    // the status-bar inset at the top.
-                    .padding(.leading, max(screenInsets.left, isPad ? 28 : 14))
-                    .padding(.trailing, max(screenInsets.right, isPad ? 28 : 14))
+                    // safe area. The actual paddings come from the same cockpit
+                    // geometry as the answer banks: pause is centred over the
+                    // left column and the score edge ends over the right one.
+                    .padding(.leading, hudInsets.leading)
+                    .padding(.trailing, hudInsets.trailing)
                     .padding(.top, hudTop(below: topInset))
                     .opacity(showsGameplayHUD ? 1 : 0)
                     .scaleEffect(showsGameplayHUD ? 1 : 0.92, anchor: .topLeading)
@@ -567,6 +578,15 @@ struct GameView: View {
                 .shadow(color: .black.opacity(0.45), radius: 8, y: 4)
                 .shadow(color: hudCyan.opacity(0.28), radius: 10, y: 2)
             }
+            // These displays hang from the roof rather than lying flat on the
+            // screen. A restrained forward pitch exposes the lower housing and
+            // creates depth without compromising text legibility or hit areas.
+            .rotation3DEffect(.degrees(isPad ? 4.2 : 5.0),
+                              axis: (x: 1, y: 0, z: 0),
+                              anchor: .top,
+                              perspective: 0.22)
+            .shadow(color: .black.opacity(0.34), radius: isPad ? 5 : 3,
+                    y: isPad ? 6 : 4)
     }
 
     private var hudCyan: Color { Color(red: 0.00, green: 0.75, blue: 1.00) }

@@ -15,8 +15,12 @@ public enum GameConfig {
 
     // MARK: Answers
 
-    /// Space Lion keeps eight unique answers visible around the screen.
-    public static let answerBubbleCount = 8
+    /// Space Lion keeps six unique answers visible: three on each side wall.
+    /// The two bottom tiles of the old eight-button cockpit are gone.
+    public static let answerBubbleCount = 6
+
+    /// Buttons stacked in one side column.
+    public static var answerColumnCount: Int { answerBubbleCount / 2 }
 
     /// Wrong answers a question must supply: every button but the right one.
     public static var distractorCount: Int { answerBubbleCount - 1 }
@@ -42,9 +46,18 @@ public enum GameConfig {
     /// sessions; the clock remains the actual end condition.
     public static let maximumRoundCeiling = 10_000
 
-    /// Keep a small runway ready while allowing a timed run to continue well
-    /// beyond its target without holding thousands of rounds in memory.
+    /// Keep a small runway of live rounds ready while allowing a timed run to
+    /// continue well beyond its target without holding thousands of rounds.
     public static let preparedRoundRunway = 4
+
+    /// How many rounds are composed before the first sum is shown. Questions,
+    /// the six answers and which button is correct are all fixed up front, so
+    /// answering never has to invent a new tile. The level clock is
+    /// `board maximum × 10` seconds and a round cannot finish faster than the
+    /// lion's flight, so this stays ahead of a real session.
+    public static func preparedSequenceLength(boardMaximum: Int) -> Int {
+        max(answerBubbleCount * 8, max(1, boardMaximum) * 12)
+    }
 
     /// Cards awarded for a correct answer on a normal card.
     public static let normalCardReward = 1
