@@ -152,8 +152,8 @@ public final class MemoryGame {
         Double(lifeHalves) / Double(GameConfig.lifeGranularity)
     }
 
-    /// The target is a score marker, not a finish line. The clock ends the run,
-    /// so this is only a defensive upper bound for persisted data.
+    /// Generated rounds have a defensive upper bound, although a normal run
+    /// finishes as soon as the board's required questions are answered.
     public var maximumRounds: Int { GameConfig.maximumRoundCeiling }
 
     /// Whether a tap on an answer card can be accepted right now.
@@ -414,11 +414,16 @@ public final class MemoryGame {
         finish(reason: .timeExpired)
     }
 
-    /// Installs the next round after a correct answer. Passing the board target
-    /// is visible in the HUD, but only the session clock ends the run.
+    /// Installs the next round after a correct answer. Ten correct answers make
+    /// a stage; the final stage completes exactly at the board target.
     @discardableResult
     public func advance() -> GameState {
         guard state == .roundComplete else { return state }
+
+        if result.correctAnswers >= board.maximum {
+            finish(reason: .roundsCompleted)
+            return state
+        }
 
         roundNumber += 1
         if preparedRounds.isEmpty { appendPreparedRounds(startingAt: roundNumber) }

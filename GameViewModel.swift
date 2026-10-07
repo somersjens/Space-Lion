@@ -27,6 +27,7 @@ final class GameViewModel: ObservableObject {
     @Published private(set) var round: GameRound?
     @Published private(set) var roundNumber = 0
     @Published private(set) var cards = 0
+    @Published private(set) var completedQuestions = 0
     @Published private(set) var livesRemaining = GameConfig.startingLives
     @Published private(set) var selectedOptionID: UUID?
     @Published private(set) var isGameOver = false
@@ -34,6 +35,11 @@ final class GameViewModel: ObservableObject {
     @Published private(set) var hasBonusFishPower = false
     @Published private(set) var isHeartFishAvailable = false
     @Published private(set) var comboAnnouncementID = 0
+    /// The destination currently visible through the cockpit window. A board
+    /// contains two to five ten-question stages, depending on its maximum.
+    @Published private(set) var stageNumber = 1
+    @Published private(set) var isStageTransitioning = false
+    @Published private(set) var stageJourneyID = 0
     /// The most recent question answered incorrectly, with its answer filled
     /// in. It remains part of this run until a fresh run is started.
     @Published private(set) var lastMissedChallenge: String?
@@ -46,8 +52,8 @@ final class GameViewModel: ObservableObject {
     /// Never during a guided run: the life lesson is about losing a heart, and
     /// a rescue heart in the same flight would teach the opposite thing.
     @Published private(set) var isRescueHeartDue = false
-    /// Space Lion gives every target ten seconds. The clock is paused by the
-    /// existing pause card and whenever the app leaves the foreground.
+    /// Time left in the current ten-question stage. Later destinations shorten
+    /// the per-question allowance: 10, 8, 7, 6 and finally 5 seconds.
     @Published private(set) var timeRemaining: Int
 
     /// Invalidates pending timed work when a round is superseded (restart, or
@@ -67,14 +73,22 @@ final class GameViewModel: ObservableObject {
     /// the step being taught bends; it never touches the engine itself.
     private let director = TutorialDirector()
 
-    var acceptsInput: Bool { state == .answering && !isPaused }
+    var acceptsInput: Bool { state == .answering && !isPaused && !isStageTransitioning }
+    var totalStages: Int {
+        max(1, Int(ceil(Double(request.board.maximum) / Double(GameConfig.questionsPerStage))))
+    }
+    var currentStageDuration: Int { GameConfig.stageDuration(stage: stageNumber) }
+    var secondsPerQuestion: Int {
+        let index = min(max(1, stageNumber), GameConfig.secondsPerQuestionByStage.count) - 1
+        return GameConfig.secondsPerQuestionByStage[index]
+    }
 
     init(request: GameSessionRequest) {
         self.request = request
         self.engine = MemoryGame(level: request.level,
                             mixedVariant: request.mixedVariant,
                             mode: request.mode)
-        let duration = request.board.maximum * 10
+        let duration = GameConfig.stageDuration(stage: 1)
         self.timeRemaining = duration
         self.clockStoredSeconds = TimeInterval(duration)
         // Not seeded from the request: the welcome flow only pre-arms the start
@@ -168,7 +182,12 @@ final class GameViewModel: ObservableObject {
             engine.resume(from: paused)
             hasBonusFishPower = paused.hasBonusFishPower ?? false
             lastMissedChallenge = paused.lastMissedChallenge
-            let restored = paused.timeRemainingSeconds ?? request.board.maximum * 10
+            let restoredStage = Self.stage(after: paused.correctAnswers,
+                                           maximum: request.board.maximum)
+            stageNumber = restoredStage
+            let stageDuration = GameConfig.stageDuration(stage: restoredStage)
+            let restored = min(paused.timeRemainingSeconds ?? stageDuration,
+                               stageDuration)
             timeRemaining = restored
             clockStoredSeconds = TimeInterval(restored)
         } else {
@@ -279,9 +298,12 @@ final class GameViewModel: ObservableObject {
         hasBonusFishPower = false
         lastMissedChallenge = nil
         comboAnnouncementID = 0
+        stageNumber = 1
+        isStageTransitioning = false
+        stageJourneyID = 0
         lastCorrectCatchTime = nil
         stopClock(rememberingRemaining: false)
-        timeRemaining = request.board.maximum * 10
+        timeRemaining = GameConfig.stageDuration(stage: 1)
         clockStoredSeconds = TimeInterval(timeRemaining)
         AppAudio.shared.playSessionStart()
         openRound()
@@ -322,6 +344,7 @@ final class GameViewModel: ObservableObject {
         let token = generation
         let delay: Double
         let announcesNextRound: Bool
+        let startsNewStage: Bool
         switch outcome {
         case .correct(_, let usedBonusFish):
             let now = ProcessInfo.processInfo.systemUptime
@@ -336,6 +359,15 @@ final class GameViewModel: ObservableObject {
             }
             delay = GameConfig.nextRoundDelay.correct
             announcesNextRound = true
+            let correct = engine.result.correctAnswers
+            if correct.isMultiple(of: GameConfig.questionsPerStage) {
+                // The tenth answer owns the finish line. Do not let the stage
+                // expire during its short success animation after the player
+                // already supplied that answer in time.
+                stopClock(rememberingRemaining: false)
+            }
+            startsNewStage = correct < request.board.maximum
+                && correct.isMultiple(of: GameConfig.questionsPerStage)
         case .wrong:
             lastMissedChallenge = engine.round?.question.solvedPrompt
             lastCorrectCatchTime = nil
@@ -348,6 +380,7 @@ final class GameViewModel: ObservableObject {
             // to start 0.46 seconds after the passage and sounded like a second
             // positive verdict on top of it.
             announcesNextRound = false
+            startsNewStage = false
         case .ignored:
             return false
         }
@@ -369,9 +402,13 @@ final class GameViewModel: ObservableObject {
             if self.engine.state == .gameOver {
                 self.finishSession(playsFanfare: announcesNextRound)
             } else if self.engine.round?.id != previousRoundID {
-                // Every completed passage opens the already-previewed next sum.
-                if announcesNextRound { self.announceRound() }
-                self.openRound()
+                if startsNewStage {
+                    self.beginStageJourney()
+                } else {
+                    // Every completed passage opens the already-previewed next sum.
+                    if announcesNextRound { self.announceRound() }
+                    self.openRound()
+                }
             }
             self.sync()
         }
@@ -436,6 +473,30 @@ final class GameViewModel: ObservableObject {
         recordResultIfNeeded(playsFanfare: playsFanfare)
     }
 
+    /// Freezes play while the cockpit flies forward, installs the next planet,
+    /// and only then starts that destination's shorter clock.
+    private func beginStageJourney() {
+        stopClock(rememberingRemaining: false)
+        let nextStage = Self.stage(after: engine.result.correctAnswers,
+                                   maximum: request.board.maximum)
+        set(\.stageNumber, nextStage)
+        let duration = GameConfig.stageDuration(stage: nextStage)
+        clockStoredSeconds = TimeInterval(duration)
+        set(\.timeRemaining, duration)
+        set(\.isStageTransitioning, true)
+        stageJourneyID &+= 1
+
+        let token = generation
+        schedule(after: GameConfig.stageTravelDuration, token: token) { [weak self] in
+            guard let self, self.engine.state != .gameOver else { return }
+            self.set(\.isStageTransitioning, false)
+            self.announceRound()
+            self.openRound()
+            self.sync()
+            self.startClockIfPossible()
+        }
+    }
+
     // MARK: - Level clock
 
     /// Keeps background time out of the level clock without changing the
@@ -455,6 +516,7 @@ final class GameViewModel: ObservableObject {
 
     private func startClockIfPossible() {
         guard clockSubscription == nil, sceneIsActive, !isPaused,
+              !isStageTransitioning,
               engine.state != .intro, engine.state != .gameOver,
               clockStoredSeconds > 0 else { return }
         clockDeadline = Date().addingTimeInterval(clockStoredSeconds)
@@ -547,6 +609,7 @@ final class GameViewModel: ObservableObject {
         set(\.round, engine.round)
         set(\.roundNumber, engine.roundNumber)
         set(\.cards, engine.cards)
+        set(\.completedQuestions, engine.result.correctAnswers)
         set(\.livesRemaining, engine.livesRemaining)
         set(\.selectedOptionID, engine.selectedOptionID)
         // Publish the completed result before the game-over flag. GameView
@@ -556,6 +619,11 @@ final class GameViewModel: ObservableObject {
         set(\.isHeartFishAvailable, engine.isHeartFishAvailable)
         set(\.isRescueHeartDue, engine.isRescueHeartDue && !director.isRunning)
         set(\.visibleRounds, engine.visibleRounds)
+    }
+
+    private static func stage(after correctAnswers: Int, maximum: Int) -> Int {
+        let total = max(1, Int(ceil(Double(maximum) / Double(GameConfig.questionsPerStage))))
+        return min(total, max(1, correctAnswers / GameConfig.questionsPerStage + 1))
     }
 
     private func set<Value: Equatable>(_ keyPath: ReferenceWritableKeyPath<GameViewModel, Value>,

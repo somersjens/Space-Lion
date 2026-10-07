@@ -41,9 +41,24 @@ public enum GameConfig {
 
     // MARK: Session
 
-    /// Timed runs keep generating questions after the board target has been
-    /// passed. This deliberately generous ceiling only sanity-checks restored
-    /// sessions; the clock remains the actual end condition.
+    /// A stage always contains ten successfully answered questions. Completing
+    /// a stage moves the ship to a new destination and tightens the clock.
+    public static let questionsPerStage = 10
+
+    /// Seconds available per question in each successive stage. These are
+    /// converted into one continuous stage clock (100, 80, 70, 60 and 50
+    /// seconds), so a mistake costs time without silently changing question.
+    public static let secondsPerQuestionByStage = [10, 8, 7, 6, 5]
+
+    public static func stageDuration(stage: Int) -> Int {
+        let index = min(max(1, stage), secondsPerQuestionByStage.count) - 1
+        return questionsPerStage * secondsPerQuestionByStage[index]
+    }
+
+    /// How long the forward flight between two destinations remains visible.
+    public static let stageTravelDuration = 2.35
+
+    /// Defensive upper bound for generated questions and restored sessions.
     public static let maximumRoundCeiling = 10_000
 
     /// Keep a small runway of live rounds ready while allowing a timed run to
@@ -52,9 +67,8 @@ public enum GameConfig {
 
     /// How many rounds are composed before the first sum is shown. Questions,
     /// the six answers and which button is correct are all fixed up front, so
-    /// answering never has to invent a new tile. The level clock is
-    /// `board maximum × 10` seconds and a round cannot finish faster than the
-    /// lion's flight, so this stays ahead of a real session.
+    /// answering never has to invent a new tile. A round cannot finish faster
+    /// than the lion's flight, so this stays ahead of a real session.
     public static func preparedSequenceLength(boardMaximum: Int) -> Int {
         max(answerBubbleCount * 8, max(1, boardMaximum) * 12)
     }
