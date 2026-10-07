@@ -640,9 +640,9 @@ extension SpaceLionPlayfield {
         var answerSize: CGFloat {
             // `size` is the complete mechanical module; the illuminated stone
             // inside remains comfortably above the 44 pt touch minimum.
-            min(max(slotHeight * 0.91, isPad ? 86 : 67),
-                isPad ? 151 : 110,
-                size.width * 0.162)
+            min(max(slotHeight * 1.09, isPad ? 103 : 80),
+                isPad ? 181 : 132,
+                size.width * 0.194)
         }
         private var columnPadding: CGFloat { answerSize * 0.13 }
         /// Physical cabinet visible outside the answer modules. Keeping this
@@ -660,12 +660,15 @@ extension SpaceLionPlayfield {
         }
 
         /// Three controls in each side column, read top to bottom: the lowest
-        /// values on the left wall, the highest on the right wall.
+        /// values on the left wall, the highest on the right wall. These are
+        /// deliberately on one vertical axis: perspective belongs to the room
+        /// around the controls, never to the control alignment itself.
         var answerPoints: [CGPoint] {
             let rows = (0..<GameConfig.answerColumnCount).map {
                 columnTop + slotHeight * (CGFloat($0) + 0.5)
             }
-            return rows.map { CGPoint(x: leftX, y: $0) } + rows.map { CGPoint(x: rightX, y: $0) }
+            return rows.map { CGPoint(x: leftX, y: $0) }
+                + rows.map { CGPoint(x: rightX, y: $0) }
         }
 
         fileprivate var cockpit: CockpitLayout {
@@ -1253,7 +1256,8 @@ private struct SpaceshipCockpit: View {
         for (index, point) in layout.buttonPoints.enumerated() {
             let phase = Double(index)
             let isLeft = point.x < window.midX
-            let innerX = isLeft ? layout.leftEdge : layout.rightEdge
+            let outward: CGFloat = isLeft ? -1 : 1
+            let innerX = point.x - outward * layout.buttonSize * 0.58
             let frameX = isLeft
                 ? window.minX - frameWidth * 0.5
                 : window.maxX + frameWidth * 0.5
@@ -1526,227 +1530,206 @@ private struct SpaceshipCockpit: View {
                             innerIsTrailing: Bool,
                             window: CGRect) {
         guard maxX > minX else { return }
-        let rect = CGRect(x: minX, y: 0, width: maxX - minX, height: size.height)
         let innerX = innerIsTrailing ? maxX : minX
         let outerX = innerIsTrailing ? minX : maxX
-        let inward: CGFloat = innerIsTrailing ? -1 : 1
+        let outward: CGFloat = innerIsTrailing ? -1 : 1
+        let towardInner = -outward
         let buttonSize = layout.buttonSize
-
         let mounts = layout.buttonPoints.enumerated().filter { $0.element.x > minX && $0.element.x < maxX }
         let points = mounts.map(\.element)
-        let controlX = points.first?.x ?? rect.midX
-        // The backplane continues from behind the answer stones toward the
-        // glass. Only beyond the outside edge of the stones does the thick,
-        // perspective cabinet return begin.
-        let outerModuleEdge = controlX + inward * buttonSize * 0.54
-        let backplaneMinX = innerIsTrailing ? outerModuleEdge : innerX
-        let backplaneMaxX = innerIsTrailing ? innerX : outerModuleEdge
-        let backplane = CGRect(x: min(backplaneMinX, backplaneMaxX),
-                               y: 0,
-                               width: abs(backplaneMaxX - backplaneMinX),
-                               height: size.height)
-        let returnMinX = innerIsTrailing ? minX : outerModuleEdge
-        let returnMaxX = innerIsTrailing ? outerModuleEdge : maxX
-        let cabinetReturn = CGRect(x: min(returnMinX, returnMaxX),
-                                   y: 0,
-                                   width: abs(returnMaxX - returnMinX),
-                                   height: size.height)
+        guard let first = points.first, let last = points.last else { return }
 
-        context.fill(Path(rect), with: .color(metalDark))
-        context.fill(Path(backplane),
+        // The answer rack is part of the rear wall and therefore stays truly
+        // vertical. The room depth lives outside it: lines on the side wall
+        // spread toward the viewer (the screen edge) and converge toward the
+        // centre of the rear viewport.
+        let controlX = first.x
+        let outerModuleX = controlX + outward * buttonSize * 0.58
+        let innerModuleX = controlX + towardInner * buttonSize * 0.58
+        let vanishingY = window.midY
+        let frontSpread: CGFloat = isPad ? 1.34 : 1.40
+
+        func frontY(for backY: CGFloat) -> CGFloat {
+            vanishingY + (backY - vanishingY) * frontSpread
+        }
+
+        /// `depth` is zero at the near, cropped screen edge and one at the
+        /// rear wall beside the answer rack.
+        func wallPoint(backY: CGFloat, depth: CGFloat) -> CGPoint {
+            let nearY = frontY(for: backY)
+            return CGPoint(x: outerX + (outerModuleX - outerX) * depth,
+                           y: nearY + (backY - nearY) * depth)
+        }
+
+        // One closed side wall. It reaches beyond the canvas at the near edge
+        // so no strip of the star field can read as an accidental side window.
+        var sideWall = Path()
+        sideWall.move(to: wallPoint(backY: 0, depth: 0))
+        sideWall.addLine(to: wallPoint(backY: 0, depth: 1))
+        sideWall.addLine(to: wallPoint(backY: size.height, depth: 1))
+        sideWall.addLine(to: wallPoint(backY: size.height, depth: 0))
+        sideWall.closeSubpath()
+        context.fill(sideWall,
                      with: .linearGradient(
-                        Gradient(colors: [Color(red: 0.05, green: 0.08, blue: 0.18),
-                                          Color(red: 0.12, green: 0.18, blue: 0.34),
-                                          Color(red: 0.035, green: 0.055, blue: 0.13)]),
-                        startPoint: CGPoint(x: outerModuleEdge, y: 0),
-                        endPoint: CGPoint(x: innerX, y: 0)
-                     ))
+                        Gradient(colors: innerIsTrailing
+                                 ? [Color(red: 0.015, green: 0.025, blue: 0.065),
+                                    Color(red: 0.16, green: 0.22, blue: 0.40),
+                                    Color(red: 0.035, green: 0.055, blue: 0.14)]
+                                 : [Color(red: 0.035, green: 0.055, blue: 0.14),
+                                    Color(red: 0.16, green: 0.22, blue: 0.40),
+                                    Color(red: 0.015, green: 0.025, blue: 0.065)]),
+                        startPoint: CGPoint(x: outerX, y: vanishingY),
+                        endPoint: CGPoint(x: outerModuleX, y: vanishingY)))
 
-        // A genuinely extruded outer return. Each armour segment has a front,
-        // an inward-facing side and a lower face, while the heavy spine and
-        // illuminated throat make the cabinet read as a volume rather than a
-        // patterned strip behind the controls.
-        if cabinetReturn.width > 1 {
-            let towardInner = -inward
-            let depth = min(isPad ? 18 : 12,
-                            max(4, cabinetReturn.width * 0.24))
-            context.fill(Path(cabinetReturn),
+        // Broad wall facets share the same vanishing point. Their seams are
+        // depth lines, not vertical cage bars.
+        let facetStops: [CGFloat] = [0, 0.235, 0.50, 0.765, 1]
+        for index in 0..<(facetStops.count - 1) {
+            let backTop = size.height * facetStops[index]
+            let backBottom = size.height * facetStops[index + 1]
+            var facet = Path()
+            facet.move(to: wallPoint(backY: backTop, depth: 0))
+            facet.addLine(to: wallPoint(backY: backTop, depth: 1))
+            facet.addLine(to: wallPoint(backY: backBottom, depth: 1))
+            facet.addLine(to: wallPoint(backY: backBottom, depth: 0))
+            facet.closeSubpath()
+            context.fill(facet,
                          with: .linearGradient(
-                            Gradient(colors: [Color(red: 0.008, green: 0.014, blue: 0.042),
-                                              Color(red: 0.08, green: 0.12, blue: 0.24),
-                                              metalLight.opacity(0.68),
-                                              Color(red: 0.025, green: 0.04, blue: 0.10)]),
-                            startPoint: CGPoint(x: outerX, y: 0),
-                            endPoint: CGPoint(x: outerModuleEdge, y: 0)
-                         ))
+                            Gradient(colors: index.isMultiple(of: 2)
+                                     ? [Color(red: 0.035, green: 0.055, blue: 0.13),
+                                        Color(red: 0.20, green: 0.27, blue: 0.47),
+                                        Color(red: 0.06, green: 0.095, blue: 0.22)]
+                                     : [Color(red: 0.015, green: 0.025, blue: 0.075),
+                                        Color(red: 0.11, green: 0.17, blue: 0.33),
+                                        Color(red: 0.025, green: 0.04, blue: 0.11)]),
+                            startPoint: wallPoint(backY: backTop, depth: 0.08),
+                            endPoint: wallPoint(backY: backBottom, depth: 0.92)))
 
-            // A raised backbone at the hull edge gives the entire return a
-            // second depth plane before the individual armour blocks begin.
-            let spineWidth = max(4, cabinetReturn.width * 0.24)
-            let spine = CGRect(x: innerIsTrailing
-                               ? cabinetReturn.minX
-                               : cabinetReturn.maxX - spineWidth,
-                               y: 0,
-                               width: spineWidth,
-                               height: size.height)
-            context.fill(Path(spine),
-                         with: .linearGradient(
-                            Gradient(colors: innerIsTrailing
-                                     ? [Color.black.opacity(0.94), metalLight.opacity(0.72), metalDark]
-                                     : [metalDark, metalLight.opacity(0.72), Color.black.opacity(0.94)]),
-                            startPoint: CGPoint(x: spine.minX, y: 0),
-                            endPoint: CGPoint(x: spine.maxX, y: 0)))
-            let spineEdgeX = innerIsTrailing ? spine.maxX : spine.minX
-            var spineEdge = Path()
-            spineEdge.move(to: CGPoint(x: spineEdgeX, y: 0))
-            spineEdge.addLine(to: CGPoint(x: spineEdgeX, y: size.height))
-            context.stroke(spineEdge, with: .color(.black.opacity(0.90)), lineWidth: isPad ? 6 : 4)
-            context.stroke(spineEdge.offsetBy(dx: towardInner * (isPad ? 2.5 : 1.5), dy: 0),
-                           with: .color(.white.opacity(0.20)), lineWidth: isPad ? 1.8 : 1.1)
-
-            let panelInset = max(2, cabinetReturn.width * 0.12)
-            let panelWidth = max(1, cabinetReturn.width - panelInset * 1.65)
-            let segmentHeight = size.height / 4
-            for segment in 0..<4 {
-                let rearPanel = CGRect(
-                    x: innerIsTrailing
-                        ? cabinetReturn.minX + panelInset * 0.72
-                        : cabinetReturn.maxX - panelWidth - panelInset * 0.72,
-                    y: CGFloat(segment) * segmentHeight + segmentHeight * 0.08,
-                    width: panelWidth,
-                    height: segmentHeight * 0.84
-                )
-                let frontPanel = rearPanel.offsetBy(dx: inward * depth * 0.42,
-                                                    dy: -depth * 0.28)
-                let cut = min(frontPanel.width * 0.24,
-                              frontPanel.height * 0.18)
-
-                // Contact shadow, then the two exposed faces between the rear
-                // footprint and the raised front plate.
-                let shadow = chamfered(rearPanel.offsetBy(dx: inward * depth * 0.18,
-                                                          dy: depth * 0.34),
-                                       cut: cut)
-                context.fill(shadow, with: .color(.black.opacity(0.62)))
-
-                let frontInnerX = innerIsTrailing ? frontPanel.maxX : frontPanel.minX
-                let rearInnerX = innerIsTrailing ? rearPanel.maxX : rearPanel.minX
-                var sideFace = Path()
-                sideFace.move(to: CGPoint(x: frontInnerX, y: frontPanel.minY + cut))
-                sideFace.addLine(to: CGPoint(x: rearInnerX, y: rearPanel.minY + cut + depth * 0.32))
-                sideFace.addLine(to: CGPoint(x: rearInnerX, y: rearPanel.maxY - cut * 0.72))
-                sideFace.addLine(to: CGPoint(x: frontInnerX, y: frontPanel.maxY - cut))
-                sideFace.closeSubpath()
-                context.fill(sideFace,
-                             with: .linearGradient(
-                                Gradient(colors: [metalLight.opacity(0.72),
-                                                  metal.opacity(0.92),
-                                                  Color.black.opacity(0.88)]),
-                                startPoint: CGPoint(x: 0, y: frontPanel.minY),
-                                endPoint: CGPoint(x: 0, y: rearPanel.maxY)))
-                context.stroke(sideFace, with: .color(.black.opacity(0.78)), lineWidth: 1)
-
-                var lowerFace = Path()
-                lowerFace.move(to: CGPoint(x: frontPanel.minX + cut, y: frontPanel.maxY))
-                lowerFace.addLine(to: CGPoint(x: frontPanel.maxX - cut, y: frontPanel.maxY))
-                lowerFace.addLine(to: CGPoint(x: rearPanel.maxX - cut, y: rearPanel.maxY))
-                lowerFace.addLine(to: CGPoint(x: rearPanel.minX + cut, y: rearPanel.maxY))
-                lowerFace.closeSubpath()
-                context.fill(lowerFace,
-                             with: .linearGradient(
-                                Gradient(colors: [metal.opacity(0.76), .black.opacity(0.94)]),
-                                startPoint: CGPoint(x: 0, y: frontPanel.maxY),
-                                endPoint: CGPoint(x: 0, y: rearPanel.maxY)))
-                context.stroke(lowerFace, with: .color(.black.opacity(0.84)), lineWidth: 1)
-
-                let panelPath = chamfered(frontPanel, cut: cut)
-                context.fill(panelPath,
-                             with: .linearGradient(
-                                Gradient(colors: segment.isMultiple(of: 2)
-                                    ? [Color(red: 0.22, green: 0.31, blue: 0.54),
-                                       Color(red: 0.06, green: 0.10, blue: 0.24),
-                                       Color(red: 0.018, green: 0.03, blue: 0.09)]
-                                    : [Color(red: 0.08, green: 0.13, blue: 0.28),
-                                       Color(red: 0.20, green: 0.28, blue: 0.49),
-                                       Color(red: 0.035, green: 0.06, blue: 0.15)]),
-                                startPoint: CGPoint(x: frontPanel.minX, y: frontPanel.minY),
-                                endPoint: CGPoint(x: frontPanel.maxX, y: frontPanel.maxY)
-                             ))
-                context.stroke(panelPath,
-                               with: .color(.black.opacity(0.82)),
-                               lineWidth: isPad ? 3.5 : 2.2)
-                context.stroke(chamfered(frontPanel.insetBy(dx: max(1, frontPanel.width * 0.055),
-                                                            dy: max(1, frontPanel.height * 0.055)),
-                                           cut: min(frontPanel.width * 0.17,
-                                                    frontPanel.height * 0.12)),
-                               with: .linearGradient(
-                                Gradient(colors: [.white.opacity(0.35),
-                                                  cyan.opacity(0.12),
-                                                  .black.opacity(0.48)]),
-                                startPoint: CGPoint(x: 0, y: frontPanel.minY),
-                                endPoint: CGPoint(x: 0, y: frontPanel.maxY)),
-                               lineWidth: isPad ? 1.5 : 1)
-
-                // A hard specular top edge makes the extrusion survive even
-                // when the panel is only a few dozen points wide.
-                var topBevel = Path()
-                topBevel.move(to: CGPoint(x: frontPanel.minX + cut, y: frontPanel.minY))
-                topBevel.addLine(to: CGPoint(x: frontPanel.maxX - cut, y: frontPanel.minY))
-                context.stroke(topBevel, with: .color(.white.opacity(0.36)),
-                               lineWidth: isPad ? 2.2 : 1.4)
-
-                // Alternating vents and reactor slits stop the outside return
-                // reading as a broad, featureless wall on extra-wide devices.
-                if segment.isMultiple(of: 2) {
-                    let vent = CGRect(x: frontPanel.minX + frontPanel.width * 0.18,
-                                      y: frontPanel.midY - frontPanel.height * 0.12,
-                                      width: frontPanel.width * 0.64,
-                                      height: frontPanel.height * 0.24)
-                    drawVent(context, rect: vent)
-                } else {
-                    for bar in 0..<3 {
-                        let y = frontPanel.midY + (CGFloat(bar) - 1) * frontPanel.height * 0.13
-                        lightBar(context,
-                                 center: CGPoint(x: frontPanel.midX, y: y),
-                                 length: frontPanel.width * (bar == 1 ? 0.54 : 0.34),
-                                 thickness: isPad ? 3.2 : 2.1,
-                                 color: bar == 1 ? orange : cyan)
-                    }
-                }
-            }
-
-            // Deep throat beside the answer module: three parallel edges with
-            // different lighting create a clear step back into the cabinet.
-            var throat = Path()
-            throat.move(to: CGPoint(x: outerModuleEdge, y: 0))
-            throat.addLine(to: CGPoint(x: outerModuleEdge, y: size.height))
-            context.stroke(throat, with: .color(.black.opacity(0.96)),
-                           lineWidth: isPad ? 12 : 8)
-            context.stroke(throat.offsetBy(dx: inward * (isPad ? 3.5 : 2.3), dy: 0),
-                           with: .color(metalLight.opacity(0.62)),
-                           lineWidth: isPad ? 5 : 3.2)
-            context.stroke(throat.offsetBy(dx: towardInner * (isPad ? 1.5 : 1), dy: 0),
-                           with: .color(cyan.opacity(0.66)),
-                           lineWidth: isPad ? 2.1 : 1.4)
+            guard index > 0 else { continue }
+            let seamY = backTop
+            var rib = Path()
+            rib.move(to: wallPoint(backY: seamY, depth: 0))
+            rib.addLine(to: wallPoint(backY: seamY, depth: 0.98))
+            context.stroke(rib, with: .color(.black.opacity(0.88)),
+                           lineWidth: isPad ? 10 : 7)
+            context.stroke(rib, with: .color(metalLight.opacity(0.46)),
+                           lineWidth: isPad ? 4.2 : 2.8)
+            context.stroke(rib.offsetBy(dx: 0, dy: -1.4),
+                           with: .color(index == 2 ? cyan.opacity(0.42) : orange.opacity(0.26)),
+                           lineWidth: isPad ? 1.8 : 1.1)
         }
 
-        // Long rails make the three controls read as one engineered assembly.
-        let bankTop = max(0, (points.first?.y ?? 0) - buttonSize * 0.62)
-        let bankBottom = min(size.height, (points.last?.y ?? size.height) + buttonSize * 0.62)
-        for fraction in [0.12, 0.88] as [CGFloat] {
-            let x = backplane.minX + backplane.width * fraction
-            var rail = Path()
-            rail.move(to: CGPoint(x: x, y: bankTop))
-            rail.addLine(to: CGPoint(x: x, y: bankBottom))
-            context.stroke(rail, with: .color(.black.opacity(0.82)), lineWidth: isPad ? 7 : 5)
-            context.stroke(rail, with: .color(metalLight.opacity(0.28)), lineWidth: isPad ? 2 : 1.3)
+        // Low, raised armour plates sit on that side wall. The front face,
+        // lower edge and cast shadow all obey the same perspective projection.
+        // Keeping them shallow avoids recreating the old stack of grey boxes.
+        let plateBands: [(CGFloat, CGFloat)] = [(-0.015, 0.155),
+                                                (0.295, 0.445),
+                                                (0.565, 0.715),
+                                                (0.855, 1.015)]
+        let lift = min(buttonSize * 0.075, isPad ? 12 : 8)
+        for (index, band) in plateBands.enumerated() {
+            let backTop = size.height * band.0
+            let backBottom = size.height * band.1
+            let nearDepth: CGFloat = 0.08
+            let farDepth: CGFloat = 0.70
+
+            var face = Path()
+            face.move(to: wallPoint(backY: backTop, depth: nearDepth))
+            face.addLine(to: wallPoint(backY: backTop, depth: farDepth))
+            face.addLine(to: wallPoint(backY: backBottom, depth: farDepth + 0.035))
+            face.addLine(to: wallPoint(backY: backBottom, depth: nearDepth + 0.02))
+            face.closeSubpath()
+
+            context.fill(face.offsetBy(dx: outward * lift * 0.34, dy: lift * 0.58),
+                         with: .color(.black.opacity(0.66)))
+
+            let lowerNear = wallPoint(backY: backBottom, depth: nearDepth + 0.02)
+            let lowerFar = wallPoint(backY: backBottom, depth: farDepth + 0.035)
+            var lowerFace = Path()
+            lowerFace.move(to: lowerNear)
+            lowerFace.addLine(to: lowerFar)
+            lowerFace.addLine(to: CGPoint(x: lowerFar.x + outward * lift * 0.26,
+                                          y: lowerFar.y + lift * 0.56))
+            lowerFace.addLine(to: CGPoint(x: lowerNear.x + outward * lift * 0.26,
+                                          y: lowerNear.y + lift * 0.56))
+            lowerFace.closeSubpath()
+            context.fill(lowerFace,
+                         with: .linearGradient(
+                            Gradient(colors: [metal.opacity(0.72), .black.opacity(0.96)]),
+                            startPoint: lowerNear,
+                            endPoint: CGPoint(x: lowerNear.x, y: lowerNear.y + lift)))
+
+            context.fill(face,
+                         with: .linearGradient(
+                            Gradient(colors: [metalLight.opacity(0.72),
+                                              Color(red: 0.09, green: 0.14, blue: 0.29),
+                                              Color(red: 0.022, green: 0.035, blue: 0.105)]),
+                            startPoint: wallPoint(backY: backTop, depth: nearDepth),
+                            endPoint: wallPoint(backY: backBottom, depth: farDepth)))
+            context.stroke(face, with: .color(.black.opacity(0.86)),
+                           lineWidth: isPad ? 3.2 : 2)
+
+            var topHighlight = Path()
+            topHighlight.move(to: wallPoint(backY: backTop, depth: nearDepth))
+            topHighlight.addLine(to: wallPoint(backY: backTop, depth: farDepth))
+            context.stroke(topHighlight, with: .color(.white.opacity(0.32)),
+                           lineWidth: isPad ? 2.2 : 1.4)
+
+            let detailStart = wallPoint(backY: (backTop + backBottom) * 0.5, depth: 0.22)
+            let detailEnd = wallPoint(backY: (backTop + backBottom) * 0.5, depth: 0.53)
+            var detail = Path()
+            detail.move(to: detailStart)
+            detail.addLine(to: detailEnd)
+            context.stroke(detail, with: .color(.black.opacity(0.80)),
+                           lineWidth: isPad ? 8 : 5)
+            context.stroke(detail,
+                           with: .color((index.isMultiple(of: 2) ? cyan : orange).opacity(0.72)),
+                           lineWidth: isPad ? 2.8 : 1.8)
         }
 
-        var edge = Path()
-        edge.move(to: CGPoint(x: innerX, y: 0))
-        edge.addLine(to: CGPoint(x: innerX, y: size.height))
-        context.stroke(edge, with: .color(.black.opacity(0.88)), lineWidth: isPad ? 7 : 5)
-        context.stroke(edge.offsetBy(dx: inward * (isPad ? 4 : 2.5), dy: 0),
-                       with: .color(cyan.opacity(0.40)), lineWidth: isPad ? 1.8 : 1.2)
+        // A compact rear-wall equipment recess carries all three buttons. It
+        // ends just beyond the first and last module instead of becoming a
+        // floor-to-ceiling bar.
+        let bankTop = max(0, first.y - buttonSize * 0.60)
+        let bankBottom = min(size.height, last.y + buttonSize * 0.60)
+        let bayMinX = min(outerModuleX, innerX)
+        let bayMaxX = max(outerModuleX, innerX)
+        let bayRect = CGRect(x: bayMinX,
+                             y: bankTop,
+                             width: bayMaxX - bayMinX,
+                             height: bankBottom - bankTop)
+        let bayCut = min(buttonSize * 0.18, bayRect.width * 0.22)
+        let bay = chamfered(bayRect, cut: bayCut)
+        context.fill(bay,
+                     with: .linearGradient(
+                        Gradient(colors: [Color(red: 0.10, green: 0.15, blue: 0.29),
+                                          Color(red: 0.018, green: 0.03, blue: 0.085),
+                                          Color(red: 0.06, green: 0.09, blue: 0.19)]),
+                        startPoint: CGPoint(x: outerModuleX, y: bankTop),
+                        endPoint: CGPoint(x: innerX, y: bankBottom)))
+
+        // Short top and bottom returns reveal the thickness of the vertical
+        // rack; there are intentionally no full-height side rails.
+        let capDepth = min(buttonSize * 0.12, isPad ? 20 : 14)
+        for (y, direction) in [(bankTop, CGFloat(1)), (bankBottom, CGFloat(-1))] {
+            var cap = Path()
+            cap.move(to: CGPoint(x: outerModuleX, y: y))
+            cap.addLine(to: CGPoint(x: innerX, y: y))
+            cap.addLine(to: CGPoint(x: innerX - towardInner * capDepth * 0.22,
+                                    y: y + direction * capDepth))
+            cap.addLine(to: CGPoint(x: outerModuleX + towardInner * capDepth * 0.34,
+                                    y: y + direction * capDepth))
+            cap.closeSubpath()
+            context.fill(cap,
+                         with: .linearGradient(
+                            Gradient(colors: direction > 0
+                                     ? [.white.opacity(0.30), metal.opacity(0.70), .black.opacity(0.78)]
+                                     : [metal.opacity(0.58), .black.opacity(0.95)]),
+                            startPoint: CGPoint(x: 0, y: y),
+                            endPoint: CGPoint(x: 0, y: y + direction * capDepth)))
+            context.stroke(cap, with: .color(.black.opacity(0.78)),
+                           lineWidth: isPad ? 2.5 : 1.6)
+        }
 
         let frameX = innerIsTrailing
             ? window.minX - frameWidth * 0.5
@@ -1756,7 +1739,7 @@ private struct SpaceshipCockpit: View {
             let point = mount.element
 
             if point.y > window.minY + frameWidth, point.y < window.maxY - frameWidth {
-                drawConduits(in: context, from: innerX, to: frameX,
+                drawConduits(in: context, from: innerModuleX, to: frameX,
                              y: point.y)
             }
 
@@ -1764,14 +1747,13 @@ private struct SpaceshipCockpit: View {
 
             guard index + 1 < points.count else { continue }
             let between = (point.y + points[index + 1].y) / 2
-            // Each separator is a recessed bridge, not a seam across the whole
-            // wall; this preserves the continuous vertical console silhouette.
-            let bridgeStart = CGPoint(x: outerModuleEdge, y: between)
-            let bridgeEnd = CGPoint(x: innerX, y: between)
+            let bridgeStart = CGPoint(x: outerModuleX + towardInner * buttonSize * 0.08,
+                                      y: between)
+            let bridgeEnd = CGPoint(x: innerModuleX, y: between)
             seam(context, from: bridgeStart, to: bridgeEnd)
             let bridgeWidth = abs(bridgeEnd.x - bridgeStart.x)
             lightBar(context,
-                     center: CGPoint(x: (outerModuleEdge + innerX) / 2, y: between),
+                     center: CGPoint(x: (bridgeStart.x + bridgeEnd.x) / 2, y: between),
                      length: min(buttonSize * 0.24, bridgeWidth * 0.55),
                      thickness: isPad ? 3.5 : 2.5,
                      color: cyan,
