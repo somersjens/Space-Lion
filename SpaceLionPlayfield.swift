@@ -16,6 +16,9 @@ private enum SpaceAnimationBudget {
     static var characterInterval: TimeInterval { isConstrained ? 1.0 / 15.0 : 1.0 / 20.0 }
     static var sceneryInterval: TimeInterval { isConstrained ? 1.0 / 5.0 : 1.0 / 8.0 }
     static var glassInterval: TimeInterval { isConstrained ? 1.0 / 3.0 : 1.0 / 6.0 }
+    /// The boundary LEDs are only a few dashed strokes, so they can update
+    /// smoothly without forcing the much heavier space scenery to do the same.
+    static var ledInterval: TimeInterval { isConstrained ? 1.0 / 20.0 : 1.0 / 30.0 }
 }
 
 private enum LionMotionPhase: Equatable {
@@ -102,13 +105,10 @@ struct SpaceLionPlayfield: View {
             let cockpitFeedbacks = round.map {
                 $0.options.prefix(GameConfig.answerBubbleCount).map(feedback(for:))
             } ?? []
-            // Give input and character movement the complete animation budget.
-            // The cockpit clocks are purely decorative and can safely pause for
-            // the short time an answer or stage flight is in progress.
-            let runsAmbientMotion = isRunning
-                && !reduceMotion
-                && !isMoving
-                && !isTravelling
+            // Background motion stays on one uninterrupted clock. In
+            // particular, answering must not freeze the upper and lower LED
+            // strips or make their loop restart when the lion lands.
+            let runsAmbientMotion = isRunning && !reduceMotion
             ZStack {
                 SpaceshipCockpit(layout: metrics.cockpit,
                                  character: character,
@@ -716,14 +716,14 @@ struct SpaceLionPlayfield: View {
             celebrationSpin = reduceMotion ? 0 : -10
         }
 
-        withAnimation(.spring(response: reduceMotion ? 0.22 : 0.82,
-                              dampingFraction: reduceMotion ? 0.90 : 0.66)) {
+        withAnimation(.spring(response: reduceMotion ? 0.22 : 1.64,
+                              dampingFraction: reduceMotion ? 0.90 : 0.76)) {
             motionOffset = .zero
             lionScale = 1
             lionOpacity = 1
             celebrationSpin = 0
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.24 : 0.92)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.24 : 1.82)) {
             onFishEntranceComplete()
         }
     }
@@ -1482,15 +1482,29 @@ private struct SpaceshipCockpit: View {
                 drawFeedbackLights(in: context)
             }
 
-            // One shared clock drives every live cockpit light. Previously
-            // every answer button owned a TimelineView and Canvas of its own.
-            // The cockpit scenery drifts slowly; 10 fps is ample for it. The
-            // interactive lion still uses compositor animations independently.
+            // The heavier cockpit scenery deliberately stays on a slow clock.
+            // The interactive lion and boundary LEDs have their own cheaper
+            // animation paths, so neither needs to inherit this low cadence.
             TimelineView(.animation(minimumInterval: SpaceAnimationBudget.sceneryInterval,
                                     paused: !isRunning)) { timeline in
                 let time = timeline.date.timeIntervalSinceReferenceDate
                 Canvas(rendersAsynchronously: true) { context, size in
                     drawAnimated(in: context, size: size, time: time)
+                }
+            }
+
+            // Only four dashed strokes and their glow are redrawn here. This
+            // dedicated clock keeps the long LED strips fluid while avoiding a
+            // 30-fps redraw of the nebula, asteroids and cockpit effects.
+            TimelineView(.animation(minimumInterval: SpaceAnimationBudget.ledInterval,
+                                    paused: !isRunning)) { timeline in
+                let time = timeline.date.timeIntervalSinceReferenceDate
+                Canvas { context, size in
+                    drawBoundaryLightChains(
+                        in: context,
+                        size: size,
+                        phase: CGFloat(cockpitWrap(time * 0.028))
+                    )
                 }
             }
         }
@@ -1596,13 +1610,6 @@ private struct SpaceshipCockpit: View {
         drawConduitAnimations(in: context, window: window, time: time)
         drawHullEnergyFlow(in: context, window: window, time: time)
         drawPlatformPulse(in: context, size: size, time: time)
-        // These are the two intentional, room-wide LED strips. Their segments
-        // move in opposite directions along the upper and lower hull joints.
-        drawBoundaryLightChains(
-            in: context,
-            size: size,
-            phase: CGFloat(cockpitWrap(time * 0.028))
-        )
     }
 
     /// The fixed part of the two armoured cables from a control to the glass.
