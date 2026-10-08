@@ -13,9 +13,9 @@ private enum SpaceAnimationBudget {
         }
     }
 
-    static var characterInterval: TimeInterval { isConstrained ? 1.0 / 18.0 : 1.0 / 24.0 }
-    static var sceneryInterval: TimeInterval { isConstrained ? 1.0 / 6.0 : 1.0 / 10.0 }
-    static var glassInterval: TimeInterval { isConstrained ? 1.0 / 4.0 : 1.0 / 8.0 }
+    static var characterInterval: TimeInterval { isConstrained ? 1.0 / 15.0 : 1.0 / 20.0 }
+    static var sceneryInterval: TimeInterval { isConstrained ? 1.0 / 5.0 : 1.0 / 8.0 }
+    static var glassInterval: TimeInterval { isConstrained ? 1.0 / 3.0 : 1.0 / 6.0 }
 }
 
 private enum LionMotionPhase: Equatable {
@@ -84,8 +84,8 @@ struct SpaceLionPlayfield: View {
     @State private var feedbackBurst: SpaceAnswerBurstState?
     @State private var actionSequence = 0
     @State private var tutorialSequence = 0
-    /// Extra spin layered on the travel pose. A correct answer flips the lion
-    /// once on the way home; the value is cleared only when it is a full turn.
+    /// Extra spin layered on the travel pose. A correct answer turns the lion
+    /// 450 degrees on the way home, then hands its momentum to the idle layer.
     @State private var celebrationSpin = 0.0
     @State private var travelShakePhase: CGFloat = 0
 
@@ -102,11 +102,18 @@ struct SpaceLionPlayfield: View {
             let cockpitFeedbacks = round.map {
                 $0.options.prefix(GameConfig.answerBubbleCount).map(feedback(for:))
             } ?? []
+            // Give input and character movement the complete animation budget.
+            // The cockpit clocks are purely decorative and can safely pause for
+            // the short time an answer or stage flight is in progress.
+            let runsAmbientMotion = isRunning
+                && !reduceMotion
+                && !isMoving
+                && !isTravelling
             ZStack {
                 SpaceshipCockpit(layout: metrics.cockpit,
                                  character: character,
                                  isPad: isPad,
-                                 isRunning: isRunning && !reduceMotion,
+                                 isRunning: runsAmbientMotion,
                                  destinationStage: destinationStage,
                                  feedbacks: cockpitFeedbacks)
 
@@ -154,7 +161,7 @@ struct SpaceLionPlayfield: View {
                 SpaceViewportGlass(window: metrics.cockpit.windowRect,
                                    cut: min(metrics.cockpit.windowRect.width,
                                             metrics.cockpit.windowRect.height) * 0.11,
-                                   isRunning: isRunning && !reduceMotion)
+                                   isRunning: runsAmbientMotion)
 
                 if let tutorialMessage, tutorial.isRunning {
                     Text(tutorialMessage)
@@ -334,11 +341,17 @@ struct SpaceLionPlayfield: View {
         case .pushingOff:
             return selectedWasCorrect ? "1.2" : "1.5"
         case .travellingHome:
-            // A wrong answer deliberately holds the pointing pose a little
-            // longer; a correct answer has already retracted before its flip.
-            return selectedWasCorrect || elapsed >= returnDuration * 0.48 ? "1.2" : "1.5"
+            // A miss keeps pointing all the way back to the centre. Retraction
+            // happens only after arrival, so neither side loses a pose in flight.
+            return selectedWasCorrect ? "1.2" : "1.5"
         case .settling:
-            return elapsed < settleDuration * 0.45 ? "1.2" : "1.1"
+            if selectedWasCorrect {
+                return elapsed < settleDuration * 0.45 ? "1.2" : "1.1"
+            }
+            if elapsed < settleDuration * 0.24 { return "1.4" }
+            if elapsed < settleDuration * 0.48 { return "1.3" }
+            if elapsed < settleDuration * 0.72 { return "1.2" }
+            return "1.1"
         }
     }
 
@@ -418,7 +431,9 @@ struct SpaceLionPlayfield: View {
     private var retractFingerDuration: Double { reduceMotion ? 0.04 : 0.12 }
     private var pushOffDuration: Double { reduceMotion ? 0.05 : 0.13 }
     private var returnDuration: Double { reduceMotion ? 0.14 : 0.62 }
-    private var settleDuration: Double { reduceMotion ? 0.05 : 0.16 }
+    private var settleDuration: Double {
+        reduceMotion ? 0.05 : (selectedWasCorrect ? 0.22 : 0.34)
+    }
 
     private func beginOutwardTravel(_ option: AnswerOption,
                                      target: CGPoint,
@@ -516,9 +531,10 @@ struct SpaceLionPlayfield: View {
         motionPhase = .pushingOff
         phaseStarted = Date()
         let homeDuration = pushOffDuration + returnDuration
-        let expectedArrival = Date().addingTimeInterval(homeDuration)
-        let homeRotation = nearestEquivalent(of: idleRotation(at: expectedArrival),
-                                             to: actionRotation)
+        // Keep rotating briefly after the positional return has finished. This
+        // gives the flip room to decelerate naturally instead of squeezing its
+        // final braking into the last few pixels of the return path.
+        let spinDuration = reduceMotion ? homeDuration : homeDuration + 0.14
         // One continuous glide home. It leaves with the push and spends the
         // last third of the trip drifting to a stop, instead of arriving with
         // speed and then halting.
@@ -529,28 +545,27 @@ struct SpaceLionPlayfield: View {
         // Keep a little angular velocity at the end of the flip. The idle
         // carry takes over that velocity at the centre, avoiding a hard stop.
         let spinAnimation: Animation = reduceMotion
-            ? .linear(duration: homeDuration)
-            : .timingCurve(0.18, 0.35, 0.80, 0.984,
-                           duration: homeDuration)
+            ? .linear(duration: spinDuration)
+            : .timingCurve(0.22, 0.30, 0.74, 0.9785,
+                           duration: spinDuration)
         let buttonAnimation: Animation = reduceMotion
             ? .easeOut(duration: 0.10)
             : .spring(response: 0.22, dampingFraction: 0.52)
         withAnimation(recoilAnimation) {
             motionOffset = .zero
-            // A miss comes back to the neutral drifting orientation. A correct
-            // answer keeps its approach orientation: the separate, fixed-size
-            // somersault below is then exactly 360 degrees for every button.
-            if !celebrates { actionRotation = homeRotation }
         } completion: {
             guard actionSequence == token else { return }
-            beginSettling(token: token)
+            // A correct answer hands off from the spin animation's own
+            // completion below. A miss has no spin, so its travel owns arrival.
+            if !celebrates { beginSettling(token: token) }
         }
         if celebrates {
             withAnimation(spinAnimation) {
-                // Exactly one full turn, irrespective of the answer position.
-                // It may finish upside down; that orientation intentionally
-                // flows into the residual idle spin instead of being corrected.
-                celebrationSpin += 360
+                // A fixed one-and-a-quarter turns for every answer position.
+                celebrationSpin += 450
+            } completion: {
+                guard actionSequence == token else { return }
+                beginSettling(token: token)
             }
         }
         withAnimation(buttonAnimation) {
@@ -577,21 +592,39 @@ struct SpaceLionPlayfield: View {
 
     private func beginSettling(token: Int) {
         let now = Date()
+        let completedSomersault = celebrationSpin
+        let carriesSomersault = selectedWasCorrect
+            && !reduceMotion
+            && abs(completedSomersault) > 0.001
         // The return glide has reached the exact centre. Transfer its angular
-        // momentum immediately instead of waiting for the settle pose to end.
-        idleRotationOffset = actionRotation - rawIdleRotation(at: now)
-        if selectedWasCorrect, !reduceMotion {
+        // position and momentum immediately instead of waiting for the settle
+        // pose to end. Baking the final angle into the idle layer prevents a
+        // snap when the separate somersault layer is cleared.
+        let rawRotation = rawIdleRotation(at: now)
+        let landingRotation = nearestEquivalent(of: actionRotation + completedSomersault,
+                                                to: rawRotation)
+        var transfer = Transaction()
+        transfer.disablesAnimations = true
+        withTransaction(transfer) {
+            idleRotationOffset = landingRotation - rawRotation
+            celebrationSpin = 0
+            motionPhase = .settling
+            phaseStarted = now
+        }
+        if carriesSomersault {
             spinCarryStarted = now
-            // Continue in the somersault's direction at about 28 degrees per
-            // second, then slowly hand back to the permanent weightless drift.
-            let direction = celebrationSpin < 0 ? -1.0 : 1.0
-            spinCarryDistance = direction * 140
+            // The longer bezier above ends at about 42 degrees per second. The
+            // carry starts at that exact speed: 25% calmer than before, without
+            // introducing a stop or a second acceleration at the handoff.
+            let direction = completedSomersault < 0 ? -1.0 : 1.0
+            spinCarryDistance = direction * 210
         } else {
             spinCarryStarted = nil
             spinCarryDistance = 0
+            // A miss has no somersault to unwind. Preserve the direction in
+            // which the lion reached that button; the normal small idle sway
+            // now continues around that left- or right-facing orientation.
         }
-        motionPhase = .settling
-        phaseStarted = now
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) {
             guard actionSequence == token else { return }
             finishAction(preservingSpinCarry: true)
