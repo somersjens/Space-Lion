@@ -20,7 +20,6 @@ private enum SpaceAnimationBudget {
 
 private enum LionMotionPhase: Equatable {
     case idle
-    case orientingOut
     case travellingOut
     case contact
     case retractingFinger
@@ -318,7 +317,7 @@ struct SpaceLionPlayfield: View {
     private func lionFrameName(at date: Date) -> String {
         let elapsed = max(0, date.timeIntervalSince(phaseStarted))
         switch motionPhase {
-        case .idle, .orientingOut:
+        case .idle:
             return "1.1"
         case .travellingOut:
             // Hold one pose for the complete glide. Changing sprite alignment
@@ -372,8 +371,6 @@ struct SpaceLionPlayfield: View {
         let token = actionSequence
         let now = Date()
         isMoving = true
-        motionPhase = .orientingOut
-        phaseStarted = now
         selectedOptionID = option.id
         selectedWasCorrect = option.isCorrect
         buttonHasContact = false
@@ -405,45 +402,40 @@ struct SpaceLionPlayfield: View {
         spinCarryDistance = 0
         let outwardAngle = nearestEquivalent(of: travelAngle, to: currentRotation)
 
-        withAnimation(.easeInOut(duration: orientDuration)) {
-            actionRotation = outwardAngle
-            driftAmount = 0
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + orientDuration) {
-            guard actionSequence == token else { return }
-            guard isLive, isRunning else {
-                cancelAction(token: token)
-                return
-            }
-            beginOutwardTravel(option,
-                                target: target,
-                                contactDestination: contactDestination,
-                                token: token)
-        }
+        beginOutwardTravel(option,
+                           target: target,
+                           contactDestination: contactDestination,
+                           outwardAngle: outwardAngle,
+                           token: token)
     }
 
     // Keep the response immediate, but leave enough time to read the turn,
-    // fingertip contact and return poses. Contact now lands at about 0.55s and
-    // the complete action at roughly 1.4s: still much quicker than the former
-    // three-second sequence, without feeling like the lion snaps to the button.
-    private var orientDuration: Double { reduceMotion ? 0.06 : 0.17 }
-    private var outwardDuration: Double { reduceMotion ? 0.10 : 0.38 }
+    // fingertip contact and return poses. The actual outward and homeward
+    // travel get extra room while the turn, button press and feedback stay
+    // crisp, so input still feels immediate without the lion darting around.
+    private var outwardDuration: Double { reduceMotion ? 0.10 : 0.75 }
     private var pressDuration: Double { reduceMotion ? 0.03 : 0.08 }
     private var retractFingerDuration: Double { reduceMotion ? 0.04 : 0.12 }
-    private var pushOffDuration: Double { reduceMotion ? 0.05 : 0.10 }
-    private var returnDuration: Double { reduceMotion ? 0.14 : 0.46 }
+    private var pushOffDuration: Double { reduceMotion ? 0.05 : 0.13 }
+    private var returnDuration: Double { reduceMotion ? 0.14 : 0.62 }
     private var settleDuration: Double { reduceMotion ? 0.05 : 0.16 }
 
     private func beginOutwardTravel(_ option: AnswerOption,
                                      target: CGPoint,
                                      contactDestination: CGSize,
+                                     outwardAngle: Double,
                                      token: Int) {
         motionPhase = .travellingOut
         phaseStarted = Date()
-        // Leave gently and arrive at rest, already pressed into the button.
-        // A second animation for that last nudge used to cut the glide.
-        withAnimation(.timingCurve(0.35, 0.00, 0.55, 1.00,
+        // Turning and travelling begin together, but most of the turn finishes
+        // in the first half. The remaining flight then reads as a straight,
+        // committed approach instead of one long curved sweep.
+        withAnimation(.timingCurve(0.16, 0.00, 0.32, 1.00,
+                                   duration: outwardDuration * 0.48)) {
+            actionRotation = outwardAngle
+            driftAmount = 0
+        }
+        withAnimation(.timingCurve(0.30, 0.00, 0.50, 1.00,
                                    duration: outwardDuration)) {
             motionOffset = contactDestination
         }
@@ -523,29 +515,41 @@ struct SpaceLionPlayfield: View {
     private func beginReturnMotion(token: Int, celebrates: Bool) {
         motionPhase = .pushingOff
         phaseStarted = Date()
+        let homeDuration = pushOffDuration + returnDuration
+        let expectedArrival = Date().addingTimeInterval(homeDuration)
+        let homeRotation = nearestEquivalent(of: idleRotation(at: expectedArrival),
+                                             to: actionRotation)
         // One continuous glide home. It leaves with the push and spends the
         // last third of the trip drifting to a stop, instead of arriving with
         // speed and then halting.
         let recoilAnimation: Animation = reduceMotion
-            ? .linear(duration: pushOffDuration + returnDuration)
+            ? .linear(duration: homeDuration)
             : .timingCurve(0.18, 0.35, 0.36, 1.00,
-                           duration: pushOffDuration + returnDuration)
+                           duration: homeDuration)
         // Keep a little angular velocity at the end of the flip. The idle
         // carry takes over that velocity at the centre, avoiding a hard stop.
         let spinAnimation: Animation = reduceMotion
-            ? .linear(duration: pushOffDuration + returnDuration)
+            ? .linear(duration: homeDuration)
             : .timingCurve(0.18, 0.35, 0.80, 0.984,
-                           duration: pushOffDuration + returnDuration)
+                           duration: homeDuration)
         let buttonAnimation: Animation = reduceMotion
             ? .easeOut(duration: 0.10)
             : .spring(response: 0.22, dampingFraction: 0.52)
         withAnimation(recoilAnimation) {
             motionOffset = .zero
+            // A miss comes back to the neutral drifting orientation. A correct
+            // answer keeps its approach orientation: the separate, fixed-size
+            // somersault below is then exactly 360 degrees for every button.
+            if !celebrates { actionRotation = homeRotation }
+        } completion: {
+            guard actionSequence == token else { return }
+            beginSettling(token: token)
         }
         if celebrates {
             withAnimation(spinAnimation) {
-                // Always one full turn, irrespective of which answer column
-                // was touched. The approach rotation is deliberately separate.
+                // Exactly one full turn, irrespective of the answer position.
+                // It may finish upside down; that orientation intentionally
+                // flows into the residual idle spin instead of being corrected.
                 celebrationSpin += 360
             }
         }
@@ -553,7 +557,6 @@ struct SpaceLionPlayfield: View {
             buttonImpactScale = 1
         }
 
-        let homeDuration = pushOffDuration + returnDuration
         DispatchQueue.main.asyncAfter(deadline: .now() + homeDuration * 0.58) {
             guard actionSequence == token else { return }
             withAnimation(.easeInOut(duration: homeDuration * 0.62)) {
@@ -570,11 +573,6 @@ struct SpaceLionPlayfield: View {
     private func beginReturn(token: Int) {
         motionPhase = .travellingHome
         phaseStarted = Date()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + returnDuration) {
-            guard actionSequence == token else { return }
-            beginSettling(token: token)
-        }
     }
 
     private func beginSettling(token: Int) {
@@ -584,9 +582,10 @@ struct SpaceLionPlayfield: View {
         idleRotationOffset = actionRotation - rawIdleRotation(at: now)
         if selectedWasCorrect, !reduceMotion {
             spinCarryStarted = now
-            // 20 degrees/second at hand-off (80 / 4), fading for roughly
-            // twelve seconds before the permanent idle sway dominates.
-            spinCarryDistance = 80
+            // Continue in the somersault's direction at about 28 degrees per
+            // second, then slowly hand back to the permanent weightless drift.
+            let direction = celebrationSpin < 0 ? -1.0 : 1.0
+            spinCarryDistance = direction * 140
         } else {
             spinCarryStarted = nil
             spinCarryDistance = 0
@@ -622,9 +621,9 @@ struct SpaceLionPlayfield: View {
     /// itself approaches a finite angle, while `rawIdleRotation` keeps the
     /// astronaut gently moving forever after that momentum has faded.
     private func spinCarryRotation(at date: Date) -> Double {
-        guard let spinCarryStarted, spinCarryDistance > 0 else { return 0 }
+        guard let spinCarryStarted, abs(spinCarryDistance) > 0.001 else { return 0 }
         let elapsed = max(0, date.timeIntervalSince(spinCarryStarted))
-        return spinCarryDistance * (1 - exp(-elapsed / 4.0))
+        return spinCarryDistance * (1 - exp(-elapsed / 5.0))
     }
 
     private func finishAction(preservingSpinCarry: Bool = false) {
@@ -1532,9 +1531,8 @@ private struct SpaceshipCockpit: View {
         // it continue over both side walls at exactly the same horizon as the
         // screen sill and the bottom of the answer racks.
         drawFloor(in: context, size: size, top: floorTop, time: 0)
-        // The recessed carriers and their lamps remain still; the moving side
-        // rails already provide enough cockpit motion without repainting these
-        // long room-wide paths on every scenery tick.
+        // Keep the recessed carriers in the static layer; the illuminated
+        // segments themselves are added by the shared animation canvas.
         drawBoundaryLightChains(in: context, size: size, phase: nil)
     }
 
@@ -1565,6 +1563,13 @@ private struct SpaceshipCockpit: View {
         drawConduitAnimations(in: context, window: window, time: time)
         drawHullEnergyFlow(in: context, window: window, time: time)
         drawPlatformPulse(in: context, size: size, time: time)
+        // These are the two intentional, room-wide LED strips. Their segments
+        // move in opposite directions along the upper and lower hull joints.
+        drawBoundaryLightChains(
+            in: context,
+            size: size,
+            phase: CGFloat(cockpitWrap(time * 0.028))
+        )
     }
 
     /// The fixed part of the two armoured cables from a control to the glass.
@@ -2365,7 +2370,15 @@ private struct SpaceshipCockpit: View {
             total + hypot(pair.1.x - pair.0.x, pair.1.y - pair.0.y)
         }
         let interval = dashLength + gapLength
-        let travel = phase * totalLength
+        // Both colour patterns repeat after five dash/gap intervals. The
+        // animation phase itself wraps from one back to zero, so travelling by
+        // an arbitrary path length caused a visible jump at that boundary.
+        // Cover approximately the same distance as before, but round it to a
+        // whole number of pattern repeats so the first and last frame match.
+        let patternLength = interval * 5
+        let repeatCount = max(CGFloat(1), (totalLength / patternLength).rounded())
+        let seamlessTravelLength = patternLength * repeatCount
+        let travel = phase * seamlessTravelLength
         let commonPhase = -travel + (startsWithWarmLight ? interval * 0.5 : 0)
 
         // Four cool lamps followed by one warm lamp. Both patterns share the
