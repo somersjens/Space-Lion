@@ -166,11 +166,11 @@ public enum GameConfig {
     /// character cannot be earned with cards at all, no matter the total.
     public static let characterUnlockRequirements: [Int?] = [
         0,          // lion — Space Lion starter
-        500,        // flying penguin
-        1_500,      // bunny
-        3_000,      // dog
-        5_000,      // octopus
-        nil, nil, nil, nil, nil   // crab, elephant, bear, fox, frog — Premium
+        500,        // octopus
+        1_500,      // crab
+        3_000,      // elephant
+        5_000,      // bear
+        nil, nil, nil, nil, nil   // fox, frog, penguin, bunny, dog — Premium
     ]
 
     // MARK: Level progress

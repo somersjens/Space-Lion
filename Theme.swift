@@ -32,15 +32,12 @@ struct AnimalCharacter: Identifiable, Equatable {
     let id: String
     let name: String
     let emoji: String
-    /// Flight portrait: menus, the intro card, the collection, results. It is
-    /// the same drawing the playfield rig is cut from, so a character looks in
-    /// the menus exactly like the one the player is about to fly.
+    /// Idle frame of the eight-image sheet. Menus, the welcome flow, the
+    /// intro card and the result screen all show this one drawing. Gameplay
+    /// swaps the other frames and never uses this name.
     let imageName: String
-    /// The same portrait at 384 px, for the places that draw it small — the
-    /// Premium collection strip and the Settings picker. Both show the whole
-    /// cast at once, and a screen that decoded ten full-size portraits to paint
-    /// ten 46 pt circles was doing far more work per tile than it needed, all
-    /// of it on the frame the sheet opens on.
+    /// The idle frame reduced to 256 px, for the Premium strip and the
+    /// Settings picker. Those screens draw the whole cast at once.
     let thumbnailName: String
     // Colour components (0–1).
     let primaryRGB: (Double, Double, Double)
@@ -61,8 +58,29 @@ struct AnimalCharacter: Identifiable, Equatable {
     /// Use wherever the portrait is drawn at roughly 75 pt or less.
     var thumbnail: Image { Image(thumbnailName) }
 
-    /// How this character's drawing sits inside the shared canvas. The playfield
-    /// rig and every portrait read it, so a character is one size everywhere.
+    /// Catalog prefix of the eight gameplay frames. The lion keeps its original
+    /// `1.1`…`1.8` imageset names; every other animal is `{prefix}_01`…`_08`.
+    var spritePrefix: String {
+        switch id {
+        case "flying_penguin": return "penguin"
+        case "bunny": return "rabbit"
+        default: return id
+        }
+    }
+
+    /// Frame numbers match the lion sheet. Frame 4 is on disk but unused:
+    /// the flight skips it, the same way the original lion motion does.
+    func gameplayAsset(frame: Int) -> String {
+        if id == "lion" { return "1.\(frame)" }
+        return String(format: "%@_%02d", spritePrefix, frame)
+    }
+
+    /// The welcome screen hangs the lion on the left of the form. Every other
+    /// animal hangs on the right.
+    var hangsOnLeadingSide: Bool { id == "lion" }
+
+    /// How this character's drawing sits inside the shared canvas. The archived
+    /// flight rig reads it. Menu portraits use the idle frame directly.
     var rig: CharacterRig { CharacterRig.rig(for: id) }
 
     /// Localized display name, resolved per language from the string catalog
@@ -145,34 +163,27 @@ struct CharacterRig {
     }
 }
 
-/// A character's flight portrait, drawn at the size and position the starter
-/// penguin's is. The drawings share a canvas but not how much of it they fill,
-/// so every menu that shows a character goes through here rather than sizing
-/// the image itself.
+/// The idle frame of a character, fitted into a square. The eight-frame sheets
+/// are already nearly square and contain the whole astronaut, so menus do not
+/// apply the old flight-rig offset.
 struct CharacterPortrait: View {
     let character: AnimalCharacter
-    /// The square the portrait is laid out in. The artwork keeps this footprint
-    /// no matter how far it is magnified, so nothing beside it moves.
+    /// The square the portrait is laid out in. Magnification is a drawing-only
+    /// transform, so the layout footprint stays `side` even when the artwork
+    /// overlaps a ring.
     let side: CGFloat
-    /// Extra magnification, letting a screen send the outstretched arms past a
-    /// tile's border or a decorative ring.
+    /// Extra magnification. `1` fits the whole frame inside `side`.
     var magnification: CGFloat = 1
-    /// Small portraits (roughly 75 pt and under) read the 384 px copy.
+    /// Small portraits (roughly 75 pt and under) read the 256 px copy.
     var usesThumbnail: Bool = false
 
     var body: some View {
-        let rig = character.rig
-        let scale = rig.artScale * magnification
-        // `scaledToFit` inside a square frame leaves a 3:2 drawing two thirds as
-        // tall as it is wide; the offset is measured against that drawn box.
-        let drawnHeight = side * 2 / 3
         (usesThumbnail ? character.thumbnail : character.artwork)
             .resizable()
+            .interpolation(.high)
             .scaledToFit()
             .frame(width: side, height: side)
-            .scaleEffect(scale)
-            .offset(x: side * rig.artOffset.width * scale,
-                    y: drawnHeight * rig.artOffset.height * scale)
+            .scaleEffect(magnification)
     }
 }
 
@@ -192,43 +203,43 @@ enum CharacterCatalog {
     /// animals even when the playable catalog order changes.
     static let all: [AnimalCharacter] = [
         AnimalCharacter(id: "flying_penguin", name: "Penguin", emoji: "🐧",
-                        imageName: "1_main_character", thumbnailName: "1_thumb",
+                        imageName: "penguin_01", thumbnailName: "penguin_thumb",
                         primaryRGB: (0.13, 0.42, 0.86), deepRGB: (0.04, 0.16, 0.38),
                         skyRGB: (0.86, 0.95, 1.00), tintRGB: (0.68, 0.86, 0.98)),
         AnimalCharacter(id: "bunny", name: "Bunny", emoji: "🐰",
-                        imageName: "2_main_character", thumbnailName: "2_thumb",
+                        imageName: "rabbit_01", thumbnailName: "rabbit_thumb",
                         primaryRGB: (0.96, 0.55, 0.64), deepRGB: (0.58, 0.31, 0.37),
                         skyRGB: (0.99, 0.94, 0.96), tintRGB: (0.97, 0.86, 0.89)),
         AnimalCharacter(id: "dog", name: "Dog", emoji: "🐶",
-                        imageName: "3_main_character", thumbnailName: "3_thumb",
+                        imageName: "dog_01", thumbnailName: "dog_thumb",
                         primaryRGB: (0.13, 0.70, 0.71), deepRGB: (0.05, 0.42, 0.43),
                         skyRGB: (0.90, 0.99, 0.99), tintRGB: (0.76, 0.97, 0.97)),
         AnimalCharacter(id: "lion", name: "Lion", emoji: "🦁",
-                        imageName: "4_main_character", thumbnailName: "4_thumb",
+                        imageName: "1.1", thumbnailName: "lion_thumb",
                         primaryRGB: (0.97, 0.73, 0.10), deepRGB: (0.58, 0.43, 0.02),
                         skyRGB: (0.99, 0.97, 0.89), tintRGB: (0.97, 0.91, 0.74)),
         AnimalCharacter(id: "octopus", name: "Octopus", emoji: "🐙",
-                        imageName: "5_main_character", thumbnailName: "5_thumb",
+                        imageName: "octopus_01", thumbnailName: "octopus_thumb",
                         primaryRGB: (0.66, 0.38, 0.90), deepRGB: (0.38, 0.20, 0.54),
                         skyRGB: (0.96, 0.93, 0.99), tintRGB: (0.90, 0.82, 0.97)),
         AnimalCharacter(id: "crab", name: "Crab", emoji: "🦀",
-                        imageName: "6_main_character", thumbnailName: "6_thumb",
+                        imageName: "crab_01", thumbnailName: "crab_thumb",
                         primaryRGB: (0.91, 0.24, 0.16), deepRGB: (0.55, 0.11, 0.06),
                         skyRGB: (0.99, 0.91, 0.90), tintRGB: (0.97, 0.78, 0.76)),
         AnimalCharacter(id: "elephant", name: "Elephant", emoji: "🐘",
-                        imageName: "7_main_character", thumbnailName: "7_thumb",
+                        imageName: "elephant_01", thumbnailName: "elephant_thumb",
                         primaryRGB: (0.44, 0.59, 0.80), deepRGB: (0.25, 0.34, 0.48),
                         skyRGB: (0.94, 0.96, 0.99), tintRGB: (0.86, 0.91, 0.97)),
         AnimalCharacter(id: "bear", name: "Bear", emoji: "🐻",
-                        imageName: "8_main_character", thumbnailName: "8_thumb",
+                        imageName: "bear_01", thumbnailName: "bear_thumb",
                         primaryRGB: (0.65, 0.42, 0.22), deepRGB: (0.39, 0.24, 0.11),
                         skyRGB: (0.99, 0.95, 0.92), tintRGB: (0.97, 0.88, 0.80)),
         AnimalCharacter(id: "fox", name: "Fox", emoji: "🦊",
-                        imageName: "9_main_character", thumbnailName: "9_thumb",
+                        imageName: "fox_01", thumbnailName: "fox_thumb",
                         primaryRGB: (0.97, 0.48, 0.08), deepRGB: (0.58, 0.26, 0.01),
                         skyRGB: (0.99, 0.93, 0.89), tintRGB: (0.97, 0.84, 0.73)),
         AnimalCharacter(id: "frog", name: "Frog", emoji: "🐸",
-                        imageName: "10_main_character", thumbnailName: "10_thumb",
+                        imageName: "frog_01", thumbnailName: "frog_thumb",
                         primaryRGB: (0.29, 0.72, 0.22), deepRGB: (0.15, 0.43, 0.11),
                         skyRGB: (0.92, 0.99, 0.91), tintRGB: (0.82, 0.97, 0.79))
     ]

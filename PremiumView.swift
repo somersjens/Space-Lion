@@ -242,8 +242,8 @@ struct PremiumView: View {
             ZStack {
                 SpaceOrbitHalo(accent: character.color, diameter: heroSize)
                 CharacterPortrait(character: character,
-                                  side: heroSize * 0.86,
-                                  magnification: 1.75)
+                                  side: heroSize * 0.92,
+                                  magnification: 1.04)
                     .shadow(color: character.deepColor.opacity(0.25), radius: 16, y: 9)
                     .id(previewCharacterID)
                     .transition(.scale.combined(with: .opacity))
@@ -406,7 +406,7 @@ struct PremiumView: View {
             VStack(spacing: metrics.tileSpacing) {
                 CharacterPortrait(character: animal,
                                   side: artSide,
-                                  magnification: 1.55,
+                                  magnification: 1,
                                   usesThumbnail: true)
                     .frame(height: artSide * 1.1)
                     .opacity(isAccessible ? 1 : 0.9)
@@ -683,8 +683,8 @@ struct PremiumView: View {
                         .rotationEffect(.degrees(unlockBurstRotation))
 
                         CharacterPortrait(character: animal,
-                                          side: stageSize * 0.72,
-                                          magnification: 1.55)
+                                          side: stageSize * 0.78,
+                                          magnification: 1.04)
                             .scaleEffect(unlockCharacterScale)
                             .rotationEffect(.degrees(unlockCharacterRotation))
                             .offset(y: unlockCharacterFloating ? -7 * scale : 7 * scale)

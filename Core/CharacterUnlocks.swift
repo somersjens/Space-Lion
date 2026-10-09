@@ -29,8 +29,8 @@ public enum CharacterUnlocks {
     /// Catalog order. Must match `CharacterCatalog.all`, which is asserted by a
     /// test so the two lists can never drift apart.
     public static let orderedCharacterIDs = [
-        "lion", "flying_penguin", "bunny", "dog", "octopus",
-        "crab", "elephant", "bear", "fox", "frog"
+        "lion", "octopus", "crab", "elephant", "bear",
+        "fox", "frog", "flying_penguin", "bunny", "dog"
     ]
 
     public static let starterCharacterID = orderedCharacterIDs[0]

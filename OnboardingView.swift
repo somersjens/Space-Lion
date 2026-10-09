@@ -26,10 +26,12 @@ struct OnboardingView: View {
     @State private var step = 0
     @FocusState private var isNameFieldFocused: Bool
 
+    @ObservedObject private var premium = PremiumStore.shared
+
     private var isPad: Bool { AppLayout.isPad }
     private var contentWidth: CGFloat { isPad ? 680 : 560 }
     private var onboardingCharacter: AnimalCharacter {
-        CharacterCatalog.character(id: CharacterCatalog.freeCharacterID)
+        CharacterCatalog.current(isPremium: premium.isPremium)
     }
     private var accent: Color { onboardingCharacter.color }
     private var deepAccent: Color { onboardingCharacter.deepColor }
@@ -50,14 +52,9 @@ struct OnboardingView: View {
                             - artworkSide - columnSpacing - panelInset * 2))
 
                     HStack(alignment: .center, spacing: columnSpacing) {
-                        ZStack {
-                            SpaceOrbitHalo(accent: accent, diameter: artworkSide)
-                            CharacterPortrait(character: onboardingCharacter,
-                                              side: artworkSide * 0.92,
-                                              magnification: 1.36)
-                                .animation(.spring(response: 0.42, dampingFraction: 0.82), value: step)
+                        if onboardingCharacter.hangsOnLeadingSide {
+                            onboardingArtwork(side: artworkSide)
                         }
-                        .frame(width: artworkSide, height: artworkSide)
 
                         Group {
                             switch step {
@@ -69,6 +66,10 @@ struct OnboardingView: View {
                         .id(step)
                         .transition(.opacity.combined(with: .move(edge: .trailing)))
                         .frame(width: stepWidth)
+
+                        if !onboardingCharacter.hangsOnLeadingSide {
+                            onboardingArtwork(side: artworkSide)
+                        }
                     }
                     .padding(panelInset)
                     .spaceMenuPanel(accent: accent, cornerRadius: 30, prominent: true)
@@ -104,6 +105,17 @@ struct OnboardingView: View {
                 .padding(.top, isPad ? 20 : 8)
                 .padding(.trailing, isPad ? 28 : 16)
         }
+    }
+
+    private func onboardingArtwork(side: CGFloat) -> some View {
+        ZStack {
+            SpaceOrbitHalo(accent: accent, diameter: side)
+            CharacterPortrait(character: onboardingCharacter,
+                              side: side * 0.9,
+                              magnification: 1.02)
+        }
+        .frame(width: side, height: side)
+        .animation(.spring(response: 0.42, dampingFraction: 0.82), value: onboardingCharacter.id)
     }
 
     private var backButton: some View {

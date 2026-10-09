@@ -275,7 +275,7 @@ private struct PromoMenuStill: View {
                     }
                 CharacterPortrait(character: penguin,
                                   side: isPadCanvas ? 196 : 142,
-                                  magnification: 1.55)
+                                  magnification: 1.04)
             }
             .frame(width: isPadCanvas ? 218 : 158,
                    height: isPadCanvas ? 218 : 158)

@@ -224,7 +224,7 @@ struct NameEditorCard: View {
         HStack(spacing: 16 * scale) {
             CharacterPortrait(character: theme,
                               side: 64 * scale,
-                              magnification: 1.55)
+                              magnification: 1)
 
             VStack(alignment: .leading, spacing: 10 * scale) {
                 Text("name.whatsYourName")
@@ -861,22 +861,28 @@ struct LevelCardView: View {
     }
 
     /// One ringed planet on each side of a maxed level, mirrored so the pair
-    /// stays symmetrical. Lifted to sit beside the number, clear of the score
-    /// line and the gold border.
+    /// stays symmetrical. On a wide card they sit beside the number instead of
+    /// against the border, and a little below centre so the crown above them
+    /// does not pull the card top-heavy.
     private func completedPlanets(color: Color) -> some View {
-        let side = 36 * cardScale
-        return HStack(spacing: 0) {
-            CompletionPlanet(color: color, revealStartedAt: planetRevealStartedAt)
-                .frame(width: side, height: side)
+        let side = 36 * 1.2 * cardScale
+        // Two digits, plus a gap so the rings do not touch the numeral.
+        let preferredLane = 54 * cardScale
+        return GeometryReader { proxy in
+            let lane = min(preferredLane, max(0, proxy.size.width - side * 2))
+            HStack(spacing: 0) {
+                CompletionPlanet(color: color, revealStartedAt: planetRevealStartedAt)
+                    .frame(width: side, height: side)
 
-            Spacer(minLength: 0)
+                Color.clear.frame(width: lane)
 
-            CompletionPlanet(color: color, revealStartedAt: planetRevealStartedAt)
-                .frame(width: side, height: side)
-                .scaleEffect(x: -1, y: 1)
+                CompletionPlanet(color: color, revealStartedAt: planetRevealStartedAt)
+                    .frame(width: side, height: side)
+                    .scaleEffect(x: -1, y: 1)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .offset(y: 3 * cardScale)
         }
-        .padding(.horizontal, 5 * cardScale)
-        .offset(y: -7 * cardScale)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

@@ -193,7 +193,7 @@ struct SettingsView: View {
                         .frame(width: 52, height: 52)
                     CharacterPortrait(character: animal,
                                       side: 46,
-                                      magnification: 1.55,
+                                      magnification: 1,
                                       usesThumbnail: true)
                         .opacity(isLocked ? 0.5 : 1)
                     if isLocked {

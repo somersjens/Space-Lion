@@ -266,11 +266,14 @@ struct HomeView: View {
             synchronizeUnlockPrompt(animated: unlockPrompt != nil)
         }
         .onAppear {
-            // Decode the seven in-game lion poses while the menu is calm. This
-            // keeps their first use out of the entrance and answer animations.
-            SpaceLionPlayfield.prewarmArtwork()
+            // Decode the selected character's gameplay frames while the menu is
+            // calm, so the first answer does not pay for a PNG decode.
+            SpaceLionPlayfield.prewarmArtwork(for: character)
             AppAudio.shared.prepare()
             AppAudio.shared.startMusic()
+        }
+        .onChange(of: character.id) { _, _ in
+            SpaceLionPlayfield.prewarmArtwork(for: character)
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
@@ -376,10 +379,9 @@ struct HomeView: View {
                             lineWidth: 2
                         )
                 }
-            SpaceOrbitHalo(accent: character.color, diameter: box * 0.92)
             CharacterPortrait(character: character,
-                              side: box * 0.84,
-                              magnification: 1.55)
+                              side: box * 0.92,
+                              magnification: 1)
                 .shadow(color: character.color.opacity(0.38), radius: 8, y: 3)
         }
         .frame(width: box, height: box)

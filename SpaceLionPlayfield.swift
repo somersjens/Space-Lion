@@ -41,17 +41,30 @@ private enum LionMotionPhase: Equatable {
     case settling
 }
 
-/// Semantic names for the supplied lion artwork. The original numeric asset
-/// names are retained in the catalog so Xcode does not need an asset migration,
-/// while the motion code can describe what each useful pose actually does.
-private enum LionPose: String, CaseIterable {
-    case resting = "1.1"
-    case tucked = "1.2"
-    case reaching = "1.3"
-    case pointing = "1.5"
-    case recoveringEarly = "1.6"
-    case recoveringMiddle = "1.7"
-    case recoveringLate = "1.8"
+/// Semantic names for one character's eight-frame sheet. Frame 4 is supplied
+/// but unused: it is nearly the pointing pose and carries a detached edge.
+/// The lion's frames live in the original `1.1`…`1.8` imagesets; every other
+/// animal uses `{name}_01`…`{name}_08` with the same indices.
+private enum LionPose: CaseIterable {
+    case resting
+    case tucked
+    case reaching
+    case pointing
+    case recoveringEarly
+    case recoveringMiddle
+    case recoveringLate
+
+    var frame: Int {
+        switch self {
+        case .resting: return 1
+        case .tucked: return 2
+        case .reaching: return 3
+        case .pointing: return 5
+        case .recoveringEarly: return 6
+        case .recoveringMiddle: return 7
+        case .recoveringLate: return 8
+        }
+    }
 }
 
 #if canImport(UIKit)
@@ -64,20 +77,18 @@ private final class LionPoseImageCache: @unchecked Sendable {
 
     private let lock = NSLock()
     private var images: [String: UIImage] = [:]
-    private var preparationStarted = false
+    private var requested: Set<String> = []
 
     func prepare(names: [String]) {
         lock.lock()
-        guard !preparationStarted else {
-            lock.unlock()
-            return
-        }
-        preparationStarted = true
+        let missing = names.filter { !requested.contains($0) }
+        missing.forEach { requested.insert($0) }
         lock.unlock()
+        guard !missing.isEmpty else { return }
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var prepared: [String: UIImage] = [:]
-            for name in names {
+            for name in missing {
                 autoreleasepool {
                     guard let source = UIImage(named: name) else { return }
                     let format = UIGraphicsImageRendererFormat()
@@ -166,12 +177,17 @@ struct SpaceLionPlayfield: View {
     @State private var celebrationSpin = 0.0
     @State private var travelShakePhase: CGFloat = 0
 
-    /// Called from the menu, before a level is presented, so every pose is
-    /// decompressed before the display-linked character animation needs it.
-    static func prewarmArtwork() {
+    /// Called from the menu, before a level is presented, so every pose of the
+    /// selected character is decompressed before the flight animation needs it.
+    static func prewarmArtwork(for character: AnimalCharacter) {
 #if canImport(UIKit)
-        LionPoseImageCache.shared.prepare(names: LionPose.allCases.map(\.rawValue))
+        let names = LionPose.allCases.map { character.gameplayAsset(frame: $0.frame) }
+        LionPoseImageCache.shared.prepare(names: names)
 #endif
+    }
+
+    private func poseAssetName(_ pose: LionPose) -> String {
+        character.gameplayAsset(frame: pose.frame)
     }
 
     private var round: GameRound? { rounds.first }
@@ -392,15 +408,16 @@ struct SpaceLionPlayfield: View {
 
     @ViewBuilder
     private func lionImage(_ pose: LionPose, size: CGFloat) -> some View {
+        let name = poseAssetName(pose)
 #if canImport(UIKit)
-        let image = LionPoseImageCache.shared.image(named: pose.rawValue)
-            .map(Image.init(uiImage:)) ?? Image(pose.rawValue)
+        let image = LionPoseImageCache.shared.image(named: name)
+            .map(Image.init(uiImage:)) ?? Image(name)
         image
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)
 #else
-        Image(pose.rawValue)
+        Image(name)
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)

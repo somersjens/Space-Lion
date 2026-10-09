@@ -337,8 +337,8 @@ struct LevelIntroCard: View {
                                      endPoint: .bottomTrailing))
             SpaceOrbitHalo(accent: theme.color, diameter: portraitSize * 0.88)
             CharacterPortrait(character: theme,
-                              side: portraitSize * 0.84,
-                              magnification: 1.45)
+                              side: portraitSize * 0.9,
+                              magnification: 1.02)
         }
         .frame(width: portraitSize, height: portraitSize)
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
