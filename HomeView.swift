@@ -359,33 +359,13 @@ struct HomeView: View {
 
     private var characterButton: some View {
         let box = characterBox
-        // Every portrait is a wide 3:2 flight illustration with a lot of empty
-        // canvas around it. Magnifying is a drawing-only transform: the tile
-        // keeps its fixed layout size, so the totals beside it never move, but
-        // the outstretched arms are free to reach beyond the tile's border.
         return ZStack {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(LinearGradient(colors: [SpaceMenuPalette.horizon,
-                                              character.deepColor,
-                                              SpaceMenuPalette.void],
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(
-                            LinearGradient(colors: [.white.opacity(0.92),
-                                                    character.color.opacity(0.72)],
-                                           startPoint: .topLeading,
-                                           endPoint: .bottomTrailing),
-                            lineWidth: 2
-                        )
-                }
+            SpaceOrbitHalo(accent: character.color, diameter: box)
             CharacterPortrait(character: character,
-                              side: box * 0.92,
-                              magnification: 1)
-                .shadow(color: character.color.opacity(0.38), radius: 8, y: 3)
+                              side: box * 0.9,
+                              magnification: 1.02)
         }
         .frame(width: box, height: box)
-        .shadow(color: character.deepColor.opacity(0.18), radius: 7, y: 3)
         .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         // One exclusive recognizer decides between the two actions. A
         // successful hold can therefore never fall through into the tap that

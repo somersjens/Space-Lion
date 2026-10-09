@@ -240,13 +240,20 @@ struct PremiumView: View {
             // is enlarged to let the outstretched arms overlap the decorative
             // ring slightly instead of floating small inside it.
             ZStack {
+                // A fresh halo per character. Animating the same strokes into
+                // the next colour lifts them above the portrait for a frame.
                 SpaceOrbitHalo(accent: character.color, diameter: heroSize)
+                    .id(previewCharacterID)
+                    .transition(.identity)
+                    .animation(nil, value: previewCharacterID)
+                    .zIndex(0)
                 CharacterPortrait(character: character,
                                   side: heroSize * 0.92,
                                   magnification: 1.04)
                     .shadow(color: character.deepColor.opacity(0.25), radius: 16, y: 9)
                     .id(previewCharacterID)
                     .transition(.scale.combined(with: .opacity))
+                    .zIndex(1)
             }
             .frame(maxWidth: .infinity)
 

@@ -192,9 +192,8 @@ struct ResultView: View {
         return ZStack {
             SpaceOrbitHalo(accent: character.color, diameter: heroSize)
             CharacterPortrait(character: character,
-                              side: heroSize * 0.92,
-                              magnification: 1.04)
-                .shadow(color: character.deepColor.opacity(0.25), radius: 16, y: 9)
+                              side: heroSize * 0.9,
+                              magnification: 1.02)
         }
         .frame(width: heroSize, height: heroSize)
         .accessibilityHidden(true)

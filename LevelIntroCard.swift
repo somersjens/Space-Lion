@@ -329,21 +329,12 @@ struct LevelIntroCard: View {
 
     private var characterPortrait: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(LinearGradient(colors: [SpaceMenuPalette.horizon,
-                                              theme.deepColor,
-                                              SpaceMenuPalette.void],
-                                     startPoint: .topLeading,
-                                     endPoint: .bottomTrailing))
-            SpaceOrbitHalo(accent: theme.color, diameter: portraitSize * 0.88)
+            SpaceOrbitHalo(accent: theme.color, diameter: portraitSize)
             CharacterPortrait(character: theme,
                               side: portraitSize * 0.9,
                               magnification: 1.02)
         }
         .frame(width: portraitSize, height: portraitSize)
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .stroke(.white.opacity(0.65), lineWidth: 1.5))
-        .shadow(color: theme.color.opacity(0.22), radius: 7, y: 3)
     }
 
     /// Music and sound effects are controlled separately, so a player can keep

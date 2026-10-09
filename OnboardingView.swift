@@ -108,13 +108,19 @@ struct OnboardingView: View {
     }
 
     private func onboardingArtwork(side: CGFloat) -> some View {
-        ZStack {
+        // The name step's form is narrower than the columns on the next two
+        // screens, which left the character hugging the card edge. Nudge it
+        // toward the form so it sits in the middle of that open space.
+        let nameStepNudge: CGFloat = step == 0 ? side * 0.34 : 0
+        let towardForm = onboardingCharacter.hangsOnLeadingSide ? nameStepNudge : -nameStepNudge
+        return ZStack {
             SpaceOrbitHalo(accent: accent, diameter: side)
             CharacterPortrait(character: onboardingCharacter,
                               side: side * 0.9,
                               magnification: 1.02)
         }
         .frame(width: side, height: side)
+        .offset(x: towardForm)
         .animation(.spring(response: 0.42, dampingFraction: 0.82), value: onboardingCharacter.id)
     }
 
