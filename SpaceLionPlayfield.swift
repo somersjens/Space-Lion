@@ -13,7 +13,10 @@ private enum SpaceAnimationBudget {
         }
     }
 
-    static var characterInterval: TimeInterval { isConstrained ? 1.0 / 15.0 : 1.0 / 20.0 }
+    // The lion is the focal moving object, not ambient decoration. Thirty
+    // updates per second keeps its slow post-flip settle and weightless drift
+    // visually continuous; constrained devices still get a stable 20 fps.
+    static var characterInterval: TimeInterval { isConstrained ? 1.0 / 20.0 : 1.0 / 30.0 }
     static var sceneryInterval: TimeInterval { isConstrained ? 1.0 / 5.0 : 1.0 / 8.0 }
     static var glassInterval: TimeInterval { isConstrained ? 1.0 / 3.0 : 1.0 / 6.0 }
     /// The boundary LEDs are only a few dashed strokes, so they can update
@@ -29,6 +32,19 @@ private enum LionMotionPhase: Equatable {
     case pushingOff
     case travellingHome
     case settling
+}
+
+/// Semantic names for the supplied lion artwork. The original numeric asset
+/// names are retained in the catalog so Xcode does not need an asset migration,
+/// while the motion code can describe what each useful pose actually does.
+private enum LionPose: String {
+    case resting = "1.1"
+    case tucked = "1.2"
+    case reaching = "1.3"
+    case pointing = "1.5"
+    case recoveringEarly = "1.6"
+    case recoveringMiddle = "1.7"
+    case recoveringLate = "1.8"
 }
 
 private struct SpaceAnswerBurstState: Identifiable {
@@ -73,9 +89,8 @@ struct SpaceLionPlayfield: View {
     @State private var phaseStarted = Date()
     @State private var actionRotation = 0.0
     @State private var idleRotationOffset = 0.0
-    /// Residual angular momentum after a correct-answer flip. It keeps moving
-    /// in the flip direction, eases away, and hands back to the perpetual idle
-    /// sway instead of stopping dead in the centre.
+    /// Momentum left by a successful somersault. It starts at the flip's final
+    /// angular speed, then fades into the normal weightless sway.
     @State private var spinCarryStarted: Date?
     @State private var spinCarryDistance = 0.0
     @State private var driftAmount: CGFloat = 1
@@ -87,8 +102,8 @@ struct SpaceLionPlayfield: View {
     @State private var feedbackBurst: SpaceAnswerBurstState?
     @State private var actionSequence = 0
     @State private var tutorialSequence = 0
-    /// Extra spin layered on the travel pose. A correct answer turns the lion
-    /// 450 degrees on the way home, then hands its momentum to the idle layer.
+    /// Extra spin layered on the travel pose. A correct answer makes the lion
+    /// travel one and a quarter turns, deliberately ending away from upright.
     @State private var celebrationSpin = 0.0
     @State private var travelShakePhase: CGFloat = 0
 
@@ -264,8 +279,12 @@ struct SpaceLionPlayfield: View {
             let rotation = (!isMoving || motionPhase == .settling)
                 ? idleRotation(at: timeline.date)
                 : actionRotation
-            let frameName = lionFrameName(at: timeline.date)
-            let breathe = (reduceMotion || isMoving) ? 1 : (1 + sin(time * 1.35) * 0.022)
+            let pose = lionPose(at: timeline.date)
+            // Fade breathing in with the drift during settling. Switching it
+            // on only after `isMoving` became false caused a small scale pop.
+            let breathe = reduceMotion
+                ? 1
+                : (1 + sin(time * 1.35) * 0.022 * driftAmount)
 
             ZStack {
                 Ellipse()
@@ -279,23 +298,13 @@ struct SpaceLionPlayfield: View {
                     .offset(y: metrics.lionSize * 0.30)
                     .allowsHitTesting(false)
 
-                Group {
-                    if frameName == "1.5" {
-                        // Frame 1.5 is the clean, fully extended pointing pose.
-                        // Keep its complete hand visible: its fingertip is what is
-                        // positioned against the answer button below.
-                        lionImage(frameName, size: metrics.lionSize)
-                    } else {
-                        ZStack { lionImage(frameName, size: metrics.lionSize) }
-                            // The other supplied frames contain a sliver of a
-                            // neighbouring sprite at one edge.
-                            .frame(width: metrics.lionSize * 0.84,
-                                   height: metrics.lionSize)
-                            .clipped()
-                    }
-                }
+                // The old 84%-wide crop hid a tiny detached fragment in frame
+                // 1.4, but also cut real boots and hands from the useful poses.
+                // Frame 1.4 is now omitted from the sequence, so every active
+                // pose can be rendered in full.
+                lionImage(pose, size: metrics.lionSize)
                 .frame(width: metrics.lionSize, height: metrics.lionSize)
-                .offset(poseAnchor(for: frameName, size: metrics.lionSize))
+                .offset(poseAnchor(for: pose, size: metrics.lionSize))
                 .rotationEffect(.degrees(rotation))
                 .scaleEffect(breathe)
             }
@@ -314,44 +323,49 @@ struct SpaceLionPlayfield: View {
         .accessibilityHidden(true)
     }
 
-    private func lionImage(_ name: String, size: CGFloat) -> some View {
-        Image(name)
+    private func lionImage(_ pose: LionPose, size: CGFloat) -> some View {
+        Image(pose.rawValue)
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)
     }
 
-    private func lionFrameName(at date: Date) -> String {
+    private func lionPose(at date: Date) -> LionPose {
         let elapsed = max(0, date.timeIntervalSince(phaseStarted))
         switch motionPhase {
         case .idle:
-            return "1.1"
+            return .resting
         case .travellingOut:
             // Hold one pose for the complete glide. Changing sprite alignment
             // halfway through was the small hitch visible on the old path.
-            return "1.5"
+            return .pointing
         case .contact:
-            return "1.5"
+            return .pointing
         case .retractingFinger:
-            // Contact is over: visibly fold the pointing arm away before a
-            // correct-answer flip is allowed to begin.
-            if elapsed < retractFingerDuration * 0.34 { return "1.4" }
-            if elapsed < retractFingerDuration * 0.68 { return "1.3" }
-            return "1.2"
+            // Frame 1.4 is almost identical to the pointing pose and includes
+            // a detached edge fragment. Going directly through 1.3 makes the
+            // arm fold readable without spending a frame on visual noise.
+            return elapsed < retractFingerDuration * 0.55 ? .reaching : .tucked
         case .pushingOff:
-            return selectedWasCorrect ? "1.2" : "1.5"
+            return selectedWasCorrect ? .tucked : .pointing
         case .travellingHome:
             // A miss keeps pointing all the way back to the centre. Retraction
             // happens only after arrival, so neither side loses a pose in flight.
-            return selectedWasCorrect ? "1.2" : "1.5"
+            return selectedWasCorrect ? .tucked : .pointing
         case .settling:
             if selectedWasCorrect {
-                return elapsed < settleDuration * 0.45 ? "1.2" : "1.1"
+                // These three supplied poses were previously unused. Together
+                // they bridge the tucked flip silhouette back to the open idle
+                // silhouette instead of making that entire change in one cut.
+                if elapsed < settleDuration * 0.14 { return .tucked }
+                if elapsed < settleDuration * 0.38 { return .recoveringEarly }
+                if elapsed < settleDuration * 0.62 { return .recoveringMiddle }
+                if elapsed < settleDuration * 0.84 { return .recoveringLate }
+                return .resting
             }
-            if elapsed < settleDuration * 0.24 { return "1.4" }
-            if elapsed < settleDuration * 0.48 { return "1.3" }
-            if elapsed < settleDuration * 0.72 { return "1.2" }
-            return "1.1"
+            if elapsed < settleDuration * 0.42 { return .reaching }
+            if elapsed < settleDuration * 0.72 { return .tucked }
+            return .resting
         }
     }
 
@@ -359,17 +373,16 @@ struct SpaceLionPlayfield: View {
     /// one onto the pointing pose keeps the lion from stepping sideways every
     /// time the artwork changes. Frame 1.5 stays put: the fingertip reach is
     /// measured from that pose.
-    private func poseAnchor(for frame: String, size: CGFloat) -> CGSize {
+    private func poseAnchor(for pose: LionPose, size: CGFloat) -> CGSize {
         let fraction: (CGFloat, CGFloat)
-        switch frame {
-        case "1.1": fraction = (0.063, -0.055)
-        case "1.2": fraction = (0.101, -0.050)
-        case "1.3": fraction = (0.146, -0.069)
-        case "1.4": fraction = (0.096, -0.062)
-        case "1.6": fraction = (-0.012, 0.001)
-        case "1.7": fraction = (0.039, -0.003)
-        case "1.8": fraction = (0.074, -0.007)
-        default: fraction = (0, 0)
+        switch pose {
+        case .resting: fraction = (0.063, -0.055)
+        case .tucked: fraction = (0.101, -0.050)
+        case .reaching: fraction = (0.146, -0.069)
+        case .pointing: fraction = (0, 0)
+        case .recoveringEarly: fraction = (-0.012, 0.001)
+        case .recoveringMiddle: fraction = (0.039, -0.003)
+        case .recoveringLate: fraction = (0.074, -0.007)
         }
         return CGSize(width: fraction.0 * size, height: fraction.1 * size)
     }
@@ -411,6 +424,8 @@ struct SpaceLionPlayfield: View {
         let travelAngle = atan2(dy, dx) * 180 / .pi - fingerAngle
         let currentRotation = idleRotation(at: now)
         actionRotation = currentRotation
+        // Freeze any previous residual spin into the action angle. Clearing the
+        // carry after sampling it keeps the first action frame continuous.
         spinCarryStarted = nil
         spinCarryDistance = 0
         let outwardAngle = nearestEquivalent(of: travelAngle, to: currentRotation)
@@ -428,11 +443,13 @@ struct SpaceLionPlayfield: View {
     // crisp, so input still feels immediate without the lion darting around.
     private var outwardDuration: Double { reduceMotion ? 0.10 : 0.75 }
     private var pressDuration: Double { reduceMotion ? 0.03 : 0.08 }
-    private var retractFingerDuration: Double { reduceMotion ? 0.04 : 0.12 }
+    private var retractFingerDuration: Double { reduceMotion ? 0.04 : 0.16 }
     private var pushOffDuration: Double { reduceMotion ? 0.05 : 0.13 }
     private var returnDuration: Double { reduceMotion ? 0.14 : 0.62 }
     private var settleDuration: Double {
-        reduceMotion ? 0.05 : (selectedWasCorrect ? 0.22 : 0.34)
+        // At 30 fps this gives the correct-answer recovery eleven rendered
+        // steps: enough for all five poses without slowing the next question.
+        reduceMotion ? 0.05 : (selectedWasCorrect ? 0.36 : 0.34)
     }
 
     private func beginOutwardTravel(_ option: AnswerOption,
@@ -542,8 +559,8 @@ struct SpaceLionPlayfield: View {
             ? .linear(duration: homeDuration)
             : .timingCurve(0.18, 0.35, 0.36, 1.00,
                            duration: homeDuration)
-        // Keep a little angular velocity at the end of the flip. The idle
-        // carry takes over that velocity at the centre, avoiding a hard stop.
+        // Retain some angular velocity at the end. `beginSettling` transfers
+        // that velocity to a softer residual spin instead of stopping it dead.
         let spinAnimation: Animation = reduceMotion
             ? .linear(duration: spinDuration)
             : .timingCurve(0.22, 0.30, 0.74, 0.9785,
@@ -561,7 +578,6 @@ struct SpaceLionPlayfield: View {
         }
         if celebrates {
             withAnimation(spinAnimation) {
-                // A fixed one-and-a-quarter turns for every answer position.
                 celebrationSpin += 450
             } completion: {
                 guard actionSequence == token else { return }
@@ -570,13 +586,6 @@ struct SpaceLionPlayfield: View {
         }
         withAnimation(buttonAnimation) {
             buttonImpactScale = 1
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + homeDuration * 0.58) {
-            guard actionSequence == token else { return }
-            withAnimation(.easeInOut(duration: homeDuration * 0.62)) {
-                driftAmount = 1
-            }
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + pushOffDuration) {
@@ -593,13 +602,9 @@ struct SpaceLionPlayfield: View {
     private func beginSettling(token: Int) {
         let now = Date()
         let completedSomersault = celebrationSpin
-        let carriesSomersault = selectedWasCorrect
-            && !reduceMotion
-            && abs(completedSomersault) > 0.001
         // The return glide has reached the exact centre. Transfer its angular
-        // position and momentum immediately instead of waiting for the settle
-        // pose to end. Baking the final angle into the idle layer prevents a
-        // snap when the separate somersault layer is cleared.
+        // position immediately. Baking the final angle into the idle layer
+        // prevents a snap when the separate somersault layer is cleared.
         let rawRotation = rawIdleRotation(at: now)
         let landingRotation = nearestEquivalent(of: actionRotation + completedSomersault,
                                                 to: rawRotation)
@@ -611,23 +616,26 @@ struct SpaceLionPlayfield: View {
             motionPhase = .settling
             phaseStarted = now
         }
-        if carriesSomersault {
+        if selectedWasCorrect, !reduceMotion, abs(completedSomersault) > 0.001 {
             spinCarryStarted = now
-            // The longer bezier above ends at about 42 degrees per second. The
-            // carry starts at that exact speed: 25% calmer than before, without
-            // introducing a stop or a second acceleration at the handoff.
+            // About 43 degrees/second at hand-off, matching the end of the
+            // bezier above. The smaller finite distance preserves the playful
+            // after-spin without dominating the complete next question.
             let direction = completedSomersault < 0 ? -1.0 : 1.0
-            spinCarryDistance = direction * 210
+            spinCarryDistance = direction * 120
         } else {
             spinCarryStarted = nil
             spinCarryDistance = 0
-            // A miss has no somersault to unwind. Preserve the direction in
-            // which the lion reached that button; the normal small idle sway
-            // now continues around that left- or right-facing orientation.
+        }
+        // Introduce drift and breathing over the recovery poses. The rotation
+        // itself is intentionally not normalised: a miss keeps facing its
+        // chosen answer, and a success keeps the character of its 450° landing.
+        withAnimation(.easeInOut(duration: settleDuration)) {
+            driftAmount = 1
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) {
             guard actionSequence == token else { return }
-            finishAction(preservingSpinCarry: true)
+            finishAction()
         }
     }
 
@@ -650,24 +658,18 @@ struct SpaceLionPlayfield: View {
         rawIdleRotation(at: date) + idleRotationOffset + spinCarryRotation(at: date)
     }
 
-    /// Integrates a small, exponentially fading angular velocity. The carry
-    /// itself approaches a finite angle, while `rawIdleRotation` keeps the
-    /// astronaut gently moving forever after that momentum has faded.
+    /// Integrates an exponentially fading angular velocity. The first derivative
+    /// matches the end of the somersault; the finite result lets the lion come
+    /// to rest naturally at a playful, not necessarily upright, orientation.
     private func spinCarryRotation(at date: Date) -> Double {
         guard let spinCarryStarted, abs(spinCarryDistance) > 0.001 else { return 0 }
         let elapsed = max(0, date.timeIntervalSince(spinCarryStarted))
-        return spinCarryDistance * (1 - exp(-elapsed / 5.0))
+        return spinCarryDistance * (1 - exp(-elapsed / 2.8))
     }
 
-    private func finishAction(preservingSpinCarry: Bool = false) {
-        let now = Date()
-        if !preservingSpinCarry {
-            idleRotationOffset = actionRotation - rawIdleRotation(at: now)
-            spinCarryStarted = nil
-            spinCarryDistance = 0
-        }
+    private func finishAction() {
         motionPhase = .idle
-        phaseStarted = now
+        phaseStarted = Date()
         selectedOptionID = nil
         buttonHasContact = false
         buttonImpactScale = 1
@@ -686,8 +688,21 @@ struct SpaceLionPlayfield: View {
 
     private func cancelAction(token: Int) {
         guard actionSequence == token else { return }
-        withAnimation(.easeOut(duration: 0.18)) { motionOffset = .zero }
-        finishAction()
+        let now = Date()
+        // Preserve the on-screen angle before switching back to the idle
+        // rotation layer, then relax all three motion channels together.
+        idleRotationOffset = actionRotation - rawIdleRotation(at: now)
+        motionPhase = .settling
+        phaseStarted = now
+        withAnimation(.easeOut(duration: 0.18)) {
+            motionOffset = .zero
+            idleRotationOffset = 0
+            driftAmount = 1
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            guard actionSequence == token else { return }
+            finishAction()
+        }
     }
 
     private func beginEntrance(metrics: Metrics) {
