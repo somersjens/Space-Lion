@@ -187,12 +187,18 @@ final class GameViewModel: ObservableObject {
     }
 
     /// Starts the level, resuming a paused session when one is waiting.
+    /// Audio follows the visible entrance rather than waiting until that 1.8 s
+    /// animation has landed and the first question becomes interactive.
+    func beginEntranceAudio() {
+        guard engine.state == .intro else { return }
+        AppAudio.shared.setGameplayActive(true)
+        AppAudio.shared.playSessionStart()
+    }
+
     func begin() {
         guard engine.state == .intro else { return }
         isPaused = false
         PlaytimeTracker.shared.challengeStarted()
-        AppAudio.shared.setGameplayActive(true)
-        AppAudio.shared.playSessionStart()
         if let paused = PausedSessionStore.shared.session(request.board) {
             engine.resume(from: paused)
             hasBonusFishPower = paused.hasBonusFishPower ?? false
@@ -706,15 +712,11 @@ final class GameViewModel: ObservableObject {
 
     private func recordAnswerPace(elapsed: TimeInterval) {
         let allowance = Double(max(1, secondsPerQuestion))
-        let ratio = elapsed / allowance
-        let pace: AnswerPace
-        if ratio < 0.75 {
-            pace = .fast
-        } else if ratio < 1.50 {
-            pace = .steady
-        } else {
-            pace = .slow
-        }
+        // Two immediately readable outcomes: within the question allowance is
+        // green; taking longer is yellow. `.slow` remains decodable for paused
+        // sessions saved by the previous three-colour version, but new answers
+        // no longer produce it.
+        let pace: AnswerPace = elapsed <= allowance ? .fast : .steady
         answerPaces.append(pace)
     }
 

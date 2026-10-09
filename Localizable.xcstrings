@@ -7,13 +7,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%llds per question"
+            "value" : "%llds / question"
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%llds per vraag"
+            "value" : "%llds / vraag"
           }
         }
       }

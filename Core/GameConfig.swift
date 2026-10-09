@@ -65,12 +65,15 @@ public enum GameConfig {
     /// continue well beyond its target without holding thousands of rounds.
     public static let preparedRoundRunway = 4
 
-    /// How many rounds are composed before the first sum is shown. Questions,
-    /// the six answers and which button is correct are all fixed up front, so
-    /// answering never has to invent a new tile. A round cannot finish faster
-    /// than the lion's flight, so this stays ahead of a real session.
+    /// How many distinct rounds are composed before the first sum is shown.
+    /// A wrong answer reopens the same round, and the board ends as soon as its
+    /// maximum number of correct answers is reached. Preparing twelve times the
+    /// board maximum therefore built hundreds of rounds that could never be
+    /// played, synchronously on the main actor while the game was opening.
+    /// `RoundFactory` completes the final six-answer block itself, so returning
+    /// the exact board maximum still preserves the fixed, balanced sequence.
     public static func preparedSequenceLength(boardMaximum: Int) -> Int {
-        max(answerBubbleCount * 8, max(1, boardMaximum) * 12)
+        max(1, boardMaximum)
     }
 
     /// Cards awarded for a correct answer on a normal card.

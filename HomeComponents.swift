@@ -518,7 +518,7 @@ struct LevelCardView: View {
 
     /// A level that crosses its maximum on this return stays in its ordinary
     /// card until the bubbles have finished counting. Only then do the gold
-    /// card, crown and rings arrive together.
+    /// card, crown and planets arrive together.
     private var isNewMaximumCelebration: Bool {
         celebrationStartedAt != nil && (celebrationStart ?? best) < maximum && best >= maximum
     }
@@ -851,7 +851,7 @@ struct LevelCardView: View {
                 .stroke(metal, lineWidth: 2.5 * cardScale)
         )
         .overlay {
-            completedRings(color: hero)
+            completedPlanets(color: hero)
         }
         .overlay(alignment: .top) {
             completedRibbon(fill: hero, crown: metal)
@@ -860,31 +860,31 @@ struct LevelCardView: View {
         .shadow(color: metal.opacity(0.35), radius: 6, y: 3)
     }
 
-    /// Three same-colour rings form one overlapping chain on both sides of a
-    /// maxed level. The chain uses the ribbon's theme colour and leans inward.
-    private func completedRings(color: Color) -> some View {
-        HStack(spacing: 0) {
-            CompletionRings(color: color, revealStartedAt: ringRevealStartedAt)
-                .frame(width: 16 * cardScale, height: 44 * cardScale)
-                .rotationEffect(.degrees(-13), anchor: .bottom)
-                .offset(x: 30 * cardScale, y: 5 * cardScale)
+    /// One ringed planet on each side of a maxed level, mirrored so the pair
+    /// stays symmetrical. Lifted to sit beside the number, clear of the score
+    /// line and the gold border.
+    private func completedPlanets(color: Color) -> some View {
+        let side = 36 * cardScale
+        return HStack(spacing: 0) {
+            CompletionPlanet(color: color, revealStartedAt: planetRevealStartedAt)
+                .frame(width: side, height: side)
 
             Spacer(minLength: 0)
 
-            CompletionRings(color: color, revealStartedAt: ringRevealStartedAt)
-                .frame(width: 16 * cardScale, height: 44 * cardScale)
+            CompletionPlanet(color: color, revealStartedAt: planetRevealStartedAt)
+                .frame(width: side, height: side)
                 .scaleEffect(x: -1, y: 1)
-                .rotationEffect(.degrees(13), anchor: .bottom)
-                .offset(x: -30 * cardScale, y: 5 * cardScale)
         }
+        .padding(.horizontal, 5 * cardScale)
+        .offset(y: -7 * cardScale)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 
-    /// The completed card is inserted at this exact instant. Giving the rings
-    /// the shared timestamp keeps both sides perfectly synchronized even when
+    /// The completed card is inserted at this exact instant. Giving both
+    /// planets the shared timestamp keeps them synchronized even when
     /// SwiftUI creates one side a frame later than the other.
-    private var ringRevealStartedAt: Date? {
+    private var planetRevealStartedAt: Date? {
         guard isNewMaximumCelebration, let celebrationStartedAt else { return nil }
         return celebrationStartedAt.addingTimeInterval(Self.scoreCountDelay + Self.scoreCountDuration)
     }
@@ -926,64 +926,41 @@ struct LevelCardView: View {
     }
 }
 
-/// A compact chain of three interlocking rings for the sides of a completed
-/// level card, all matching the theme colour behind the crown.
-private struct CompletionRings: View {
+/// The ringed planet beside a maxed level number. The opposite side is
+/// mirrored. The far half of the ring is drawn behind the disc, so it does
+/// not cross the face.
+private struct CompletionPlanet: View {
     let color: Color
     /// Nil means this is an already-completed card and should render fully.
     let revealStartedAt: Date?
 
-    private struct Ring: Identifiable {
-        let id: Int
-        let x: CGFloat
-        let y: CGFloat
-    }
+    /// Matches the warm fill of the completed card, so the glint reads as a
+    /// highlight instead of a second theme colour.
+    private static let highlight = Color(red: 1.0, green: 0.96, blue: 0.85)
 
-    private let rings: [Ring] = [
-        Ring(id: 0, x: 0.41, y: 0.70),
-        Ring(id: 1, x: 0.50, y: 0.50),
-        Ring(id: 2, x: 0.59, y: 0.30)
-    ]
+    /// Room around the disc for the tilted ring.
+    private static let frameFactor: CGFloat = 1.9
 
-    /// The reveal lasts well under a second, after which the rings are still.
+    /// The reveal lasts well under a second, after which the planet is still.
     /// Left running, the timeline would wake every completed card at full rate
     /// for as long as the screen is up, including while a level is being played
     /// over it.
     @State private var hasSettled = false
-    /// Comfortably past the final ring's spring reveal.
-    private static let revealDuration: TimeInterval = 0.9
+    /// Comfortably past the spring reveal.
+    private static let revealDuration: TimeInterval = 0.7
 
     var body: some View {
         TimelineView(.animation(paused: hasSettled)) { context in
             let elapsed = revealStartedAt.map {
                 max(0, context.date.timeIntervalSince($0))
             } ?? .greatestFiniteMagnitude
+            let progress = revealProgress(at: elapsed)
             GeometryReader { proxy in
-                ZStack {
-                    ForEach(rings) { ring in
-                        let progress = ringProgress(ring, at: elapsed)
-                        let lineWidth = max(1.25, proxy.size.width * 0.105)
-                        ZStack {
-                            // The pale under-stroke opens a narrow gap at each
-                            // crossing, so the same-colour hoops still read as
-                            // separate, interlocking rings.
-                            Circle()
-                                .stroke(Color(red: 1.0, green: 0.94, blue: 0.78),
-                                        lineWidth: lineWidth + max(0.9, proxy.size.width * 0.065))
-                            Circle()
-                                .stroke(color,
-                                        style: StrokeStyle(lineWidth: lineWidth,
-                                                           lineCap: .round))
-                        }
-                            .frame(width: proxy.size.width * 0.72,
-                                   height: proxy.size.width * 0.72)
-                            .scaleEffect(progress, anchor: .center)
-                            .rotationEffect(.degrees((1 - progress) * 28))
-                            .opacity(min(1, progress))
-                            .position(x: proxy.size.width * ring.x,
-                                      y: proxy.size.height * ring.y)
-                    }
-                }
+                let diameter = min(proxy.size.width, proxy.size.height) / Self.frameFactor
+                planet(diameter: diameter)
+                    .scaleEffect(progress, anchor: .center)
+                    .opacity(min(1, Double(progress)))
+                    .frame(width: proxy.size.width, height: proxy.size.height)
             }
         }
         .shadow(color: .black.opacity(0.12), radius: 1, y: 0.5)
@@ -1003,13 +980,67 @@ private struct CompletionRings: View {
         }
     }
 
-    private func ringProgress(_ ring: Ring, at elapsed: TimeInterval) -> CGFloat {
-        let delay = 0.10 + Double(ring.id) * 0.07
-        let raw = min(1, max(0, (elapsed - delay) / 0.30))
-        // Match the former ornament's tiny back-ease overshoot.
+    private func planet(diameter: CGFloat) -> some View {
+        ZStack {
+            ringHalf(diameter: diameter, front: false)
+            Circle()
+                .fill(color)
+                .overlay(alignment: .topLeading) {
+                    Circle()
+                        .fill(Self.highlight)
+                        .frame(width: diameter * 0.28, height: diameter * 0.28)
+                        .offset(x: diameter * 0.16, y: diameter * 0.14)
+                }
+                .clipShape(Circle())
+                .frame(width: diameter, height: diameter)
+            ringHalf(diameter: diameter, front: true)
+        }
+    }
+
+    /// Far half first, near half after the disc. Both share the same tilt, so
+    /// the rear arc stays behind the planet instead of crossing its face.
+    private func ringHalf(diameter: CGFloat, front: Bool) -> some View {
+        RingArc(isFront: front)
+            .stroke(color, style: StrokeStyle(lineWidth: max(1.1, diameter * 0.10),
+                                              lineCap: .butt))
+            .frame(width: diameter * 1.55, height: diameter * 0.62)
+            .rotationEffect(.degrees(22))
+    }
+
+    private func revealProgress(at elapsed: TimeInterval) -> CGFloat {
+        let raw = min(1, max(0, (elapsed - 0.08) / 0.32))
         let c1 = 1.70158
         let c3 = c1 + 1
         return CGFloat(1 + c3 * pow(raw - 1, 3) + c1 * pow(raw - 1, 2))
+    }
+}
+
+/// One half of the ring, in the ring's own plane before it is tilted.
+/// The upper half is the far side; the lower half passes in front of the disc.
+private struct RingArc: Shape {
+    var isFront: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radiusX = rect.width / 2
+        let radiusY = rect.height / 2
+        // 0 is the right tip. The lower half runs through the bottom of the
+        // ellipse; the upper half is the far side of the ring.
+        let start = isFront ? 0.0 : Double.pi
+        let end = isFront ? Double.pi : Double.pi * 2
+        var path = Path()
+        let steps = 48
+        for step in 0...steps {
+            let t = start + (end - start) * Double(step) / Double(steps)
+            let point = CGPoint(x: center.x + radiusX * cos(t),
+                                y: center.y + radiusY * sin(t))
+            if step == 0 {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
+            }
+        }
+        return path
     }
 }
 

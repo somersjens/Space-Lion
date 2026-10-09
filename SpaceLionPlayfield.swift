@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Decorative motion should never compete with input or the character flight.
 /// These cadences are deliberately below display refresh rate; all motion is
@@ -21,7 +24,11 @@ private enum SpaceAnimationBudget {
     static var glassInterval: TimeInterval { isConstrained ? 1.0 / 3.0 : 1.0 / 6.0 }
     /// The boundary LEDs are only a few dashed strokes, so they can update
     /// smoothly without forcing the much heavier space scenery to do the same.
-    static var ledInterval: TimeInterval { isConstrained ? 1.0 / 20.0 : 1.0 / 30.0 }
+    // Unlike the slow scenery, a dashed line translating along a hard edge
+    // exposes every skipped sample. Keep this cheap, isolated layer at display-
+    // smooth cadence; constrained devices still receive a stable 30 fps rather
+    // than the visibly stepping 20 fps used previously.
+    static var ledInterval: TimeInterval { isConstrained ? 1.0 / 30.0 : 1.0 / 60.0 }
 }
 
 private enum LionMotionPhase: Equatable {
@@ -37,7 +44,7 @@ private enum LionMotionPhase: Equatable {
 /// Semantic names for the supplied lion artwork. The original numeric asset
 /// names are retained in the catalog so Xcode does not need an asset migration,
 /// while the motion code can describe what each useful pose actually does.
-private enum LionPose: String {
+private enum LionPose: String, CaseIterable {
     case resting = "1.1"
     case tucked = "1.2"
     case reaching = "1.3"
@@ -46,6 +53,58 @@ private enum LionPose: String {
     case recoveringMiddle = "1.7"
     case recoveringLate = "1.8"
 }
+
+#if canImport(UIKit)
+/// Asset-catalog images are compressed until their first real draw. Preparing
+/// every gameplay pose while the menu is idle prevents the first answer from
+/// paying a PNG decode in the middle of the lion's flight. The lock only guards
+/// a tiny dictionary swap/read; decoding stays entirely on a background queue.
+private final class LionPoseImageCache: @unchecked Sendable {
+    static let shared = LionPoseImageCache()
+
+    private let lock = NSLock()
+    private var images: [String: UIImage] = [:]
+    private var preparationStarted = false
+
+    func prepare(names: [String]) {
+        lock.lock()
+        guard !preparationStarted else {
+            lock.unlock()
+            return
+        }
+        preparationStarted = true
+        lock.unlock()
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var prepared: [String: UIImage] = [:]
+            for name in names {
+                autoreleasepool {
+                    guard let source = UIImage(named: name) else { return }
+                    let format = UIGraphicsImageRendererFormat()
+                    format.scale = source.scale
+                    format.opaque = false
+                    // Rendering at the source size forces decompression now;
+                    // later SwiftUI draws only scale an already-backed bitmap.
+                    let renderer = UIGraphicsImageRenderer(size: source.size, format: format)
+                    prepared[name] = renderer.image { _ in
+                        source.draw(in: CGRect(origin: .zero, size: source.size))
+                    }
+                }
+            }
+            guard let self else { return }
+            self.lock.lock()
+            self.images.merge(prepared) { _, new in new }
+            self.lock.unlock()
+        }
+    }
+
+    func image(named name: String) -> UIImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        return images[name]
+    }
+}
+#endif
 
 private struct SpaceAnswerBurstState: Identifiable {
     let id = UUID()
@@ -106,6 +165,14 @@ struct SpaceLionPlayfield: View {
     /// travel one and a quarter turns, deliberately ending away from upright.
     @State private var celebrationSpin = 0.0
     @State private var travelShakePhase: CGFloat = 0
+
+    /// Called from the menu, before a level is presented, so every pose is
+    /// decompressed before the display-linked character animation needs it.
+    static func prewarmArtwork() {
+#if canImport(UIKit)
+        LionPoseImageCache.shared.prepare(names: LionPose.allCases.map(\.rawValue))
+#endif
+    }
 
     private var round: GameRound? { rounds.first }
 
@@ -323,11 +390,21 @@ struct SpaceLionPlayfield: View {
         .accessibilityHidden(true)
     }
 
+    @ViewBuilder
     private func lionImage(_ pose: LionPose, size: CGFloat) -> some View {
+#if canImport(UIKit)
+        let image = LionPoseImageCache.shared.image(named: pose.rawValue)
+            .map(Image.init(uiImage:)) ?? Image(pose.rawValue)
+        image
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+#else
         Image(pose.rawValue)
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)
+#endif
     }
 
     private func lionPose(at date: Date) -> LionPose {
@@ -904,12 +981,13 @@ extension SpaceLionPlayfield {
                 buttonSize: answerSize)
         }
 
-        /// Shared with the HUD so the pause control sits on the exact same
-        /// vertical axis as the left answers, and the score panel terminates on
-        /// the outside edge of the right answer bank at every device size.
+        /// Shared with the HUD so the pause control is centred over the left
+        /// answer column and the score panel mirrors that same offset beside
+        /// the right column. Both outer HUD edges are therefore equidistant
+        /// from their answer axes and the complete instrument rail is centred.
         func hudInsets(pauseWidth: CGFloat) -> (leading: CGFloat, trailing: CGFloat) {
             let leading = max(0, leftX - pauseWidth / 2)
-            let trailing = max(0, size.width - (rightX + answerSize / 2))
+            let trailing = max(0, size.width - (rightX + pauseWidth / 2))
             return (leading, trailing)
         }
 

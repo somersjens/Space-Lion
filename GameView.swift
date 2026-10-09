@@ -66,6 +66,10 @@ struct GameView: View {
     /// The tutorial switch on the start card. It only decides what the start
     /// button says and does; the run itself is driven by the view model.
     @State private var isTutorialArmed = false
+    /// The first prepared sum is already available behind the start card. This
+    /// controls its one-off HUD entrance while the character is still flying
+    /// in, instead of leaving a dash in the question panel until landing.
+    @State private var revealsFirstQuestion = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(request: GameSessionRequest) {
@@ -179,13 +183,29 @@ struct GameView: View {
             model.resume()
         } else {
             showsPauseCard = false
+            // Normally prepared on the first run-loop turn after appearing;
+            // doing the guarded preparation here as well guarantees the HUD
+            // never falls back to a dash if Start is tapped immediately.
+            model.prepare()
             if isTutorialArmed {
                 model.armTutorial()
                 // However this run ends — taught out, finished early, or left
                 // at the first sum — the menu owes the player its last step.
                 TutorialCenter.shared.guidedRunStarted()
             }
+            // The cockpit and character start moving now, so the session cue
+            // and gameplay music rise now as well—not after the complete 1.8 s
+            // entrance has already finished.
+            model.beginEntranceAudio()
             playsFishEntrance = true
+            revealsFirstQuestion = reduceMotion
+            if !reduceMotion {
+                DispatchQueue.main.async {
+                    withAnimation(.spring(response: 0.48, dampingFraction: 0.72)) {
+                        revealsFirstQuestion = true
+                    }
+                }
+            }
         }
     }
 
@@ -423,52 +443,45 @@ struct GameView: View {
                     }
                 }
                 .frame(width: isPad ? 40 : 30, height: isPad ? 40 : 30)
-                VStack(alignment: .leading, spacing: isPad ? 1 : 0) {
+                VStack(alignment: .center, spacing: isPad ? 1 : 0) {
                     Text(String(format: "%d:%02d", minutes, seconds))
                         .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
                         .monospacedDigit()
                         .contentTransition(.numericText())
                         .foregroundStyle(timerUrgency > 0.55 ? lamp : .white)
+                        .frame(maxWidth: .infinity)
 
-                    HStack(spacing: isPad ? 4 : 3) {
-                        Circle()
-                            .fill(hudOrange)
-                            .frame(width: isPad ? 6 : 4, height: isPad ? 6 : 4)
-                            .shadow(color: hudOrange, radius: isPad ? 3 : 2)
-                        Text(verbatim: L(key: "game.hud.secondsPerQuestion",
-                                        count: model.secondsPerQuestion))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.78)
-                    }
+                    Text(verbatim: L(key: "game.hud.secondsPerQuestion",
+                                    count: model.secondsPerQuestion))
                     .font(.system(size: isPad ? 13 : 10,
                                   weight: .bold,
                                   design: .rounded))
                     .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.62)
+                    .frame(maxWidth: .infinity)
                 }
+                .frame(width: isPad ? 102 : 76)
             }
             .frame(maxWidth: .infinity)
+            .padding(.horizontal, isPad ? 6 : 4)
         }
-        .frame(width: isPad ? 190 : 140)
+        .frame(width: isPad ? 218 : 158)
         .accessibilityIdentifier("level-timer")
     }
 
     private var scoreCounter: some View {
         cockpitPanel {
             HStack(spacing: isPad ? 9 : 6) {
-                VStack(spacing: 0) {
-                    Image(systemName: "location.fill")
-                        .font(.system(size: isPad ? 11 : 8, weight: .black))
-                        .foregroundStyle(hudOrange)
-                        .shadow(color: hudOrange.opacity(0.9), radius: isPad ? 4 : 2)
-                    Text(verbatim: "\(model.stageNumber)/\(model.totalStages)")
-                        .environment(\.layoutDirection, .leftToRight)
-                        .font(.system(size: isPad ? 26 : 19,
-                                      weight: .black,
-                                      design: .rounded))
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .contentTransition(.numericText(value: Double(model.stageNumber)))
-                }
+                Text(verbatim: "\(model.stageNumber)/\(model.totalStages)")
+                    .environment(\.layoutDirection, .leftToRight)
+                    .font(.system(size: isPad ? 29 : 21,
+                                  weight: .black,
+                                  design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .contentTransition(.numericText(value: Double(model.stageNumber)))
+                    .shadow(color: hudOrange.opacity(0.38), radius: isPad ? 5 : 3)
 
                 Capsule()
                     .fill(hudCyan.opacity(0.36))
@@ -522,12 +535,9 @@ struct GameView: View {
         case .fast:
             colors = [Color(red: 0.62, green: 1.00, blue: 0.58),
                       Color(red: 0.08, green: 0.82, blue: 0.38)]
-        case .steady:
+        case .steady, .slow:
             colors = [Color(red: 1.00, green: 0.95, blue: 0.36),
                       Color(red: 1.00, green: 0.67, blue: 0.04)]
-        case .slow:
-            colors = [Color(red: 1.00, green: 0.66, blue: 0.17),
-                      Color(red: 1.00, green: 0.28, blue: 0.03)]
         case nil:
             colors = [Color(red: 0.26, green: 0.32, blue: 0.43),
                       Color(red: 0.10, green: 0.14, blue: 0.23)]
@@ -538,20 +548,23 @@ struct GameView: View {
     private func answerDotGlow(for pace: AnswerPace?) -> Color {
         switch pace {
         case .fast: return Color(red: 0.18, green: 1.00, blue: 0.48).opacity(0.9)
-        case .steady: return Color(red: 1.00, green: 0.83, blue: 0.10).opacity(0.9)
-        case .slow: return Color(red: 1.00, green: 0.35, blue: 0.02).opacity(0.9)
+        case .steady, .slow: return Color(red: 1.00, green: 0.83, blue: 0.10).opacity(0.9)
         case nil: return hudCyan.opacity(0.24)
         }
     }
 
     private var questionReadout: some View {
-        questionLabel(model.round?.question.prompt ?? "—")
-            .id(model.round?.id)
+        let displayedRound = model.round ?? model.visibleRounds.first
+        return questionLabel(displayedRound?.question.prompt ?? "—")
+            .id(displayedRound?.id)
             .transition(.opacity.combined(with: .scale(scale: 0.92)))
             .lineLimit(1)
             .minimumScaleFactor(0.42)
             .accessibilityIdentifier("space-lion-question")
             .frame(maxWidth: .infinity)
+            .scaleEffect(revealsFirstQuestion ? 1 : 0.78)
+            .offset(y: revealsFirstQuestion ? 0 : -7)
+            .opacity(revealsFirstQuestion ? 1 : 0)
             .animation(.spring(response: 0.34, dampingFraction: 0.82), value: model.round?.id)
     }
 
@@ -618,6 +631,15 @@ struct GameView: View {
                                                    lineCap: .round))
                         .padding(isPad ? 3.5 : 2.2)
                         .shadow(color: hudOrange.opacity(0.9), radius: 5)
+                        // Keep the lamp glow inside its own housing. Without
+                        // this mask, a later HStack sibling paints its left
+                        // lamp over the previous panel while covering that
+                        // panel's right glow, making identical rails look like
+                        // they have different brightness.
+                        .mask {
+                            CockpitHUDShape(cut: cut)
+                                .fill(.white)
+                        }
                 }
                 .overlay(alignment: .bottom) {
                     CockpitPanelEnergyRail(

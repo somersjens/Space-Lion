@@ -167,6 +167,10 @@ final class AppAudio: NSObject, ObservableObject {
     private var sessionStartupToken = 0
     private let sessionSettleDelay: TimeInterval = 0.15
     private let engineToMusicDelay: TimeInterval = 0.10
+    /// The track is already mastered at its target level. A short ramp avoids a
+    /// click while still making a cold launch audible promptly; the previous
+    /// two-second fade made successfully prepared music feel late.
+    private let coldMusicFadeDuration: TimeInterval = 0.65
     private let prepareQueue = DispatchQueue(label: "com.elephantchallenge.audio.prepare", qos: .userInitiated)
 
 
@@ -297,6 +301,11 @@ final class AppAudio: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 if self.musicPlayer == nil { self.musicPlayer = music }
+                // Music readiness is independent of the effects catalog. The
+                // old path waited for all 22 effects to decode and attach before
+                // it even activated output, although AVAudioPlayer does not use
+                // the effects engine at all.
+                self.activateSession()
                 self.startMusicIfReady()
             }
         }
@@ -377,7 +386,11 @@ final class AppAudio: NSObject, ObservableObject {
 
     private func activateSession() {
         guard hasAnyAudioEnabled else { return }
-        guard audioResourcesReady else {
+        // The looping music has its own prepared AVAudioPlayer and does not need
+        // the effects graph. Allow it to activate as soon as that player exists;
+        // effects still start once their buffers and nodes have been installed.
+        let hasMusicOutput = musicEnabled && musicPlayer != nil
+        guard audioResourcesReady || hasMusicOutput else {
             prepare()
             return
         }
@@ -400,9 +413,11 @@ final class AppAudio: NSObject, ObservableObject {
                   self.sessionActive, self.hasAnyAudioEnabled else { return }
             self.sessionOutputReady = true
             self.startEngineIfNeeded()
-            // Stagger the MP3 decoder behind the now-silent effects engine.
-            // This avoids piling two cold output paths onto the first render.
-            DispatchQueue.main.asyncAfter(deadline: .now() + self.engineToMusicDelay) {
+            // Only stagger music when the effects engine actually started in
+            // this window. On a cold launch music normally becomes ready first;
+            // waiting behind a graph that does not exist added pure latency.
+            let musicDelay = self.engine.isRunning ? self.engineToMusicDelay : 0
+            DispatchQueue.main.asyncAfter(deadline: .now() + musicDelay) {
                 guard token == self.sessionStartupToken,
                       self.sessionActive, self.hasAnyAudioEnabled else { return }
                 self.musicOutputReady = true
@@ -463,14 +478,12 @@ final class AppAudio: NSObject, ObservableObject {
     /// window. There is intentionally no synchronous cold-load fallback here.
     private func startMusicIfReady() {
         guard musicEnabled, wantsMusicPlayback,
-              audioResourcesReady, musicOutputReady else { return }
+              musicOutputReady else { return }
         guard let player = musicPlayer else { return }
         if !player.isPlaying {
             player.volume = 0
             player.play()
-            // A longer cold-start fade is especially important on the home
-            // screen: the mastered track must never arrive as a sudden hit.
-            player.setVolume(currentMusicTarget, fadeDuration: 2.0)
+            player.setVolume(currentMusicTarget, fadeDuration: coldMusicFadeDuration)
         } else {
             setMusicVolume(currentMusicTarget)
         }
