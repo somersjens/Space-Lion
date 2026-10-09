@@ -250,7 +250,9 @@ public final class MemoryGame {
     /// leaves. Nil once the session is over — there is nothing to come back to.
     public func pausedSession(hasBonusFishPower: Bool = false,
                               lastMissedChallenge: String? = nil,
-                              timeRemainingSeconds: Int? = nil) -> PausedSession? {
+                              timeRemainingSeconds: Int? = nil,
+                              answerPaces: [AnswerPace]? = nil,
+                              currentQuestionElapsedSeconds: TimeInterval? = nil) -> PausedSession? {
         guard state != .intro, state != .gameOver else { return nil }
         return PausedSession(boardID: board.storageID,
                              roundNumber: roundNumber,
@@ -267,7 +269,9 @@ public final class MemoryGame {
                              heartFishTarget: heartFishTarget,
                              isHeartFishAvailable: isHeartFishAvailable,
                              lastMissedChallenge: lastMissedChallenge,
-                             timeRemainingSeconds: timeRemainingSeconds)
+                             timeRemainingSeconds: timeRemainingSeconds,
+                             answerPaces: answerPaces,
+                             currentQuestionElapsedSeconds: currentQuestionElapsedSeconds)
     }
 
     /// The tap that turns the answer cards face down and brings the question

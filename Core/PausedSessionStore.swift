@@ -12,6 +12,15 @@
 
 import Foundation
 
+/// The colour earned by a completed question in the ten-dot stage display.
+/// Raw values are persisted with paused sessions, so adding a new case later
+/// does not change the meaning of an existing run.
+public enum AnswerPace: String, Codable, Equatable, Sendable {
+    case fast
+    case steady
+    case slow
+}
+
 /// A session frozen mid-play. Everything here is plain, validated data: a
 /// corrupt or outdated record is discarded rather than resumed.
 public struct PausedSession: Codable, Equatable, Sendable {
@@ -36,6 +45,11 @@ public struct PausedSession: Codable, Equatable, Sendable {
     public let lastMissedChallenge: String?
     /// Optional for compatibility with runs saved before Space Lion's clock.
     public let timeRemainingSeconds: Int?
+    /// Pace colours already earned in this run. Optional so sessions created
+    /// before the ten-dot HUD remain resumable.
+    public let answerPaces: [AnswerPace]?
+    /// Time already spent on the question that was active when play paused.
+    public let currentQuestionElapsedSeconds: TimeInterval?
 
     public init(boardID: String,
                 roundNumber: Int,
@@ -51,7 +65,9 @@ public struct PausedSession: Codable, Equatable, Sendable {
                 heartFishTarget: Int? = nil,
                 isHeartFishAvailable: Bool? = nil,
                 lastMissedChallenge: String? = nil,
-                timeRemainingSeconds: Int? = nil) {
+                timeRemainingSeconds: Int? = nil,
+                answerPaces: [AnswerPace]? = nil,
+                currentQuestionElapsedSeconds: TimeInterval? = nil) {
         self.boardID = boardID
         self.roundNumber = roundNumber
         self.cards = cards
@@ -67,6 +83,8 @@ public struct PausedSession: Codable, Equatable, Sendable {
         self.isHeartFishAvailable = isHeartFishAvailable
         self.lastMissedChallenge = lastMissedChallenge
         self.timeRemainingSeconds = timeRemainingSeconds
+        self.answerPaces = answerPaces
+        self.currentQuestionElapsedSeconds = currentQuestionElapsedSeconds
     }
 
     /// A record is only usable if it describes a session that can still be
@@ -82,6 +100,8 @@ public struct PausedSession: Codable, Equatable, Sendable {
             && (heartFishProgress ?? 0) >= 0
             && (heartFishTarget ?? GameConfig.heartFishCorrectAnswers) >= 1
             && (timeRemainingSeconds ?? 1) > 0
+            && (answerPaces?.count ?? 0) <= correctAnswers
+            && (currentQuestionElapsedSeconds ?? 0) >= 0
     }
 }
 

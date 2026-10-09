@@ -394,7 +394,7 @@ struct GameView: View {
         let progress = CGFloat(min(1, max(0, Double(model.timeRemaining) / Double(total))))
         let lamp = timerLamp
         return cockpitPanel {
-            HStack(spacing: isPad ? 8 : 5) {
+            HStack(spacing: isPad ? 9 : 6) {
                 // This is a decorative sweep around a once-per-second value;
                 // it does not need a separate 30 fps display link.
                 TimelineView(.animation(minimumInterval: 1.0 / 8.0,
@@ -423,81 +423,125 @@ struct GameView: View {
                     }
                 }
                 .frame(width: isPad ? 40 : 30, height: isPad ? 40 : 30)
-                Text(String(format: "%d:%02d", minutes, seconds))
-                    .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .foregroundStyle(timerUrgency > 0.55 ? lamp : .white)
+                VStack(alignment: .leading, spacing: isPad ? 1 : 0) {
+                    Text(String(format: "%d:%02d", minutes, seconds))
+                        .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .foregroundStyle(timerUrgency > 0.55 ? lamp : .white)
+
+                    HStack(spacing: isPad ? 4 : 3) {
+                        Circle()
+                            .fill(hudOrange)
+                            .frame(width: isPad ? 6 : 4, height: isPad ? 6 : 4)
+                            .shadow(color: hudOrange, radius: isPad ? 3 : 2)
+                        Text(verbatim: L(key: "game.hud.secondsPerQuestion",
+                                        count: model.secondsPerQuestion))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                    }
+                    .font(.system(size: isPad ? 13 : 10,
+                                  weight: .bold,
+                                  design: .rounded))
+                    .foregroundStyle(.white.opacity(0.72))
+                }
             }
             .frame(maxWidth: .infinity)
-            .overlay(alignment: .bottomTrailing) {
-                HStack(spacing: 3) {
-                    Image(systemName: "location.fill")
-                    Text(verbatim: "\(model.stageNumber)/\(model.totalStages)")
-                    Text(verbatim: "· \(model.secondsPerQuestion)s")
-                }
-                .font(.system(size: isPad ? 10 : 7.5, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.62))
-                .offset(y: isPad ? 7 : 5)
-            }
         }
-        .frame(width: isPad ? 178 : 122)
+        .frame(width: isPad ? 190 : 140)
         .accessibilityIdentifier("level-timer")
     }
 
     private var scoreCounter: some View {
         cockpitPanel {
-            VStack(spacing: isPad ? 5 : 3) {
-                HStack(spacing: isPad ? 8 : 5) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: isPad ? 23 : 16, weight: .bold))
-                        .foregroundStyle(hudCyan)
-                    Text(verbatim: "\(model.completedQuestions) / \(request.board.maximum)")
+            HStack(spacing: isPad ? 9 : 6) {
+                VStack(spacing: 0) {
+                    Image(systemName: "location.fill")
+                        .font(.system(size: isPad ? 11 : 8, weight: .black))
+                        .foregroundStyle(hudOrange)
+                        .shadow(color: hudOrange.opacity(0.9), radius: isPad ? 4 : 2)
+                    Text(verbatim: "\(model.stageNumber)/\(model.totalStages)")
                         .environment(\.layoutDirection, .leftToRight)
-                        .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
+                        .font(.system(size: isPad ? 26 : 19,
+                                      weight: .black,
+                                      design: .rounded))
                         .monospacedDigit()
                         .lineLimit(1)
-                        .minimumScaleFactor(0.68)
-                        .contentTransition(.numericText(value: Double(model.completedQuestions)))
+                        .contentTransition(.numericText(value: Double(model.stageNumber)))
                 }
-                progressSegments
+
+                Capsule()
+                    .fill(hudCyan.opacity(0.36))
+                    .frame(width: isPad ? 2 : 1, height: isPad ? 38 : 28)
+                    .shadow(color: hudCyan, radius: 3)
+
+                answerPaceDots
             }
             .frame(maxWidth: .infinity)
         }
-        .frame(width: isPad ? 210 : 142)
+        .frame(width: isPad ? 226 : 160)
         .animation(.spring(response: 0.3, dampingFraction: 0.72), value: model.completedQuestions)
         .accessibilityIdentifier("progress")
+        .accessibilityLabel(Text(verbatim: "\(model.stageNumber) / \(model.totalStages)"))
+        .accessibilityValue(Text(verbatim: "\(model.currentStageAnswerPaces.count) / \(GameConfig.questionsPerStage)"))
     }
 
-    private var progressSegments: some View {
-        let count = 4
-        let maximum = max(1, request.board.maximum)
-        let progress = min(1, max(0, Double(model.completedQuestions) / Double(maximum)))
-        return HStack(spacing: isPad ? 5 : 3) {
-            ForEach(0..<count, id: \.self) { index in
-                let threshold = Double(index + 1) / Double(count)
-                let filled = progress + 0.0001 >= threshold
-                Capsule()
-                    .fill(filled
-                          ? LinearGradient(colors: [Color(red: 0.55, green: 1.00, blue: 0.78),
-                                                    Color(red: 0.10, green: 0.92, blue: 0.62)],
-                                           startPoint: .leading,
-                                           endPoint: .trailing)
-                          : LinearGradient(colors: [Color(red: 0.12, green: 0.18, blue: 0.30),
-                                                    Color(red: 0.08, green: 0.12, blue: 0.22)],
-                                           startPoint: .leading,
-                                           endPoint: .trailing))
-                    .overlay(Capsule().stroke(.white.opacity(filled ? 0.45 : 0.12), lineWidth: 0.7))
-                    .shadow(color: filled
-                            ? Color(red: 0.30, green: 1.00, blue: 0.70).opacity(0.9)
-                            : .clear,
-                            radius: isPad ? 5 : 3)
-                    .scaleEffect(y: filled ? 1 : 0.82)
+    private var answerPaceDots: some View {
+        let paces = model.currentStageAnswerPaces
+        return VStack(spacing: isPad ? 5 : 3) {
+            ForEach(0..<2, id: \.self) { row in
+                HStack(spacing: isPad ? 5 : 3) {
+                    ForEach(0..<5, id: \.self) { column in
+                        let index = row * 5 + column
+                        let pace = index < paces.count ? paces[index] : nil
+                        Circle()
+                            .fill(answerDotGradient(for: pace))
+                            .overlay {
+                                Circle()
+                                    .stroke(pace == nil
+                                            ? hudCyan.opacity(0.34)
+                                            : .white.opacity(0.72),
+                                            lineWidth: isPad ? 1.5 : 1)
+                            }
+                            .shadow(color: answerDotGlow(for: pace),
+                                    radius: pace == nil ? 1 : (isPad ? 5 : 3))
+                            .frame(width: isPad ? 16 : 12, height: isPad ? 16 : 12)
+                            .scaleEffect(pace == nil ? 0.92 : 1)
+                    }
+                }
             }
         }
-        .frame(height: isPad ? 9 : 7)
+        .environment(\.layoutDirection, .leftToRight)
         .animation(.spring(response: 0.34, dampingFraction: 0.68), value: model.completedQuestions)
         .accessibilityHidden(true)
+    }
+
+    private func answerDotGradient(for pace: AnswerPace?) -> LinearGradient {
+        let colors: [Color]
+        switch pace {
+        case .fast:
+            colors = [Color(red: 0.62, green: 1.00, blue: 0.58),
+                      Color(red: 0.08, green: 0.82, blue: 0.38)]
+        case .steady:
+            colors = [Color(red: 1.00, green: 0.95, blue: 0.36),
+                      Color(red: 1.00, green: 0.67, blue: 0.04)]
+        case .slow:
+            colors = [Color(red: 1.00, green: 0.66, blue: 0.17),
+                      Color(red: 1.00, green: 0.28, blue: 0.03)]
+        case nil:
+            colors = [Color(red: 0.26, green: 0.32, blue: 0.43),
+                      Color(red: 0.10, green: 0.14, blue: 0.23)]
+        }
+        return LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom)
+    }
+
+    private func answerDotGlow(for pace: AnswerPace?) -> Color {
+        switch pace {
+        case .fast: return Color(red: 0.18, green: 1.00, blue: 0.48).opacity(0.9)
+        case .steady: return Color(red: 1.00, green: 0.83, blue: 0.10).opacity(0.9)
+        case .slow: return Color(red: 1.00, green: 0.35, blue: 0.02).opacity(0.9)
+        case nil: return hudCyan.opacity(0.24)
+        }
     }
 
     private var questionReadout: some View {

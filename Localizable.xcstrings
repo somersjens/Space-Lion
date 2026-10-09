@@ -1,6 +1,23 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "game.hud.secondsPerQuestion" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%llds per question"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%llds per vraag"
+          }
+        }
+      }
+    },
     "character.bear" : {
       "extractionState" : "manual",
       "localizations" : {

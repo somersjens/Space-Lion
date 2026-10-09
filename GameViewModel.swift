@@ -55,6 +55,9 @@ final class GameViewModel: ObservableObject {
     /// Time left in the current ten-question stage. Later destinations shorten
     /// the per-question allowance: 10, 8, 7, 6 and finally 5 seconds.
     @Published private(set) var timeRemaining: Int
+    /// One pace mark per correctly completed question. The HUD only draws the
+    /// ten marks belonging to the current stage.
+    @Published private(set) var answerPaces: [AnswerPace] = []
 
     /// Invalidates pending timed work when a round is superseded (restart, or
     /// leaving the screen), so a late callback can never touch a newer round.
@@ -69,6 +72,12 @@ final class GameViewModel: ObservableObject {
     private var clockStoredSeconds: TimeInterval
     private var sceneIsActive = true
     private var lastCorrectCatchTime: TimeInterval?
+    /// Response time is measured only while the active question accepts input.
+    /// Pauses, app backgrounding and answer feedback therefore never turn a
+    /// genuinely quick answer into a slow one.
+    private var timedRoundID: UUID?
+    private var questionElapsed: TimeInterval = 0
+    private var questionTimingStartedAt: TimeInterval?
     /// The guided run's state machine. It is asked what to show and which rules
     /// the step being taught bends; it never touches the engine itself.
     private let director = TutorialDirector()
@@ -81,6 +90,12 @@ final class GameViewModel: ObservableObject {
     var secondsPerQuestion: Int {
         let index = min(max(1, stageNumber), GameConfig.secondsPerQuestionByStage.count) - 1
         return GameConfig.secondsPerQuestionByStage[index]
+    }
+    var currentStageAnswerPaces: [AnswerPace] {
+        let first = max(0, (stageNumber - 1) * GameConfig.questionsPerStage)
+        guard first < answerPaces.count else { return [] }
+        let end = min(answerPaces.count, first + GameConfig.questionsPerStage)
+        return Array(answerPaces[first..<end])
     }
 
     init(request: GameSessionRequest) {
@@ -182,6 +197,10 @@ final class GameViewModel: ObservableObject {
             engine.resume(from: paused)
             hasBonusFishPower = paused.hasBonusFishPower ?? false
             lastMissedChallenge = paused.lastMissedChallenge
+            answerPaces = Array((paused.answerPaces ?? [])
+                .prefix(min(paused.correctAnswers, request.board.maximum)))
+            questionElapsed = max(0, paused.currentQuestionElapsedSeconds ?? 0)
+            timedRoundID = engine.round?.id
             let restoredStage = Self.stage(after: paused.correctAnswers,
                                            maximum: request.board.maximum)
             stageNumber = restoredStage
@@ -205,6 +224,7 @@ final class GameViewModel: ObservableObject {
     private func openRound() {
         engine.turnCardsOver()
         engine.beginAnswering()
+        beginQuestionTimingIfNeeded()
     }
 
     private func announceRound() {
@@ -213,6 +233,7 @@ final class GameViewModel: ObservableObject {
 
     func end() {
         director.cancel()
+        suspendQuestionTiming()
         // Leaving without finishing pauses the level rather than discarding it.
         savePausedSessionIfNeeded()
         recordResultIfNeeded()
@@ -230,6 +251,7 @@ final class GameViewModel: ObservableObject {
     func pause() {
         guard engine.state != .gameOver else { return }
         isPaused = true
+        suspendQuestionTiming()
         savePausedSessionIfNeeded()
         PlaytimeTracker.shared.challengeEnded()
         AppAudio.shared.setGameplayActive(false)
@@ -246,6 +268,7 @@ final class GameViewModel: ObservableObject {
         AppAudio.shared.setGameplayActive(true)
         sync()
         startClockIfPossible()
+        resumeQuestionTimingIfPossible()
         let work = pendingScheduledWork
         pendingScheduledWork = nil
         work?()
@@ -271,7 +294,9 @@ final class GameViewModel: ObservableObject {
               let paused = engine.pausedSession(
                 hasBonusFishPower: hasBonusFishPower,
                 lastMissedChallenge: lastMissedChallenge,
-                timeRemainingSeconds: currentClockSeconds
+                timeRemainingSeconds: currentClockSeconds,
+                answerPaces: answerPaces,
+                currentQuestionElapsedSeconds: currentQuestionElapsed
               )
         else { return }
         guard paused.cards > 0 else {
@@ -302,6 +327,8 @@ final class GameViewModel: ObservableObject {
         isStageTransitioning = false
         stageJourneyID = 0
         lastCorrectCatchTime = nil
+        answerPaces = []
+        resetQuestionTiming()
         stopClock(rememberingRemaining: false)
         timeRemaining = GameConfig.stageDuration(stage: 1)
         clockStoredSeconds = TimeInterval(timeRemaining)
@@ -336,6 +363,7 @@ final class GameViewModel: ObservableObject {
                                     usesBonusFish: usesSpeedBonus || spendsBonusFish,
                                     wrongAnswerCostHalves: costHalves)
         guard outcome != .ignored else { return false }
+        let responseTime = suspendQuestionTiming()
         // Every real interaction advances the playtime clock. Without these the
         // tracker only ever sees one gap from the first touch to the last,
         // which its idle limit then discards — a whole session counting as no
@@ -347,6 +375,7 @@ final class GameViewModel: ObservableObject {
         let startsNewStage: Bool
         switch outcome {
         case .correct(_, let usedBonusFish):
+            recordAnswerPace(elapsed: responseTime)
             let now = ProcessInfo.processInfo.systemUptime
             if let previous = lastCorrectCatchTime, now - previous <= 1 {
                 engine.awardFlyComboBonus()
@@ -469,6 +498,7 @@ final class GameViewModel: ObservableObject {
         // The board filling up, or the lives running out, ends the lesson with
         // the session it was being taught in.
         director.cancel()
+        suspendQuestionTiming()
         stopClock(rememberingRemaining: false)
         recordResultIfNeeded(playsFanfare: playsFanfare)
     }
@@ -503,8 +533,13 @@ final class GameViewModel: ObservableObject {
     /// existing pause/navigation flow.
     func setSceneActive(_ active: Bool) {
         sceneIsActive = active
-        if active { startClockIfPossible() }
-        else { stopClock(rememberingRemaining: true) }
+        if active {
+            startClockIfPossible()
+            resumeQuestionTimingIfPossible()
+        } else {
+            suspendQuestionTiming()
+            stopClock(rememberingRemaining: true)
+        }
     }
 
     private var currentClockSeconds: Int {
@@ -543,6 +578,7 @@ final class GameViewModel: ObservableObject {
         let remaining = currentClockSeconds
         set(\.timeRemaining, remaining)
         guard remaining == 0 else { return }
+        suspendQuestionTiming()
         stopClock(rememberingRemaining: false)
         generation &+= 1
         pendingScheduledWork = nil
@@ -627,6 +663,59 @@ final class GameViewModel: ObservableObject {
     private static func stage(after correctAnswers: Int, maximum: Int) -> Int {
         let total = max(1, Int(ceil(Double(maximum) / Double(GameConfig.questionsPerStage))))
         return min(total, max(1, correctAnswers / GameConfig.questionsPerStage + 1))
+    }
+
+    // MARK: - Per-question pace
+
+    private var currentQuestionElapsed: TimeInterval {
+        guard let started = questionTimingStartedAt else { return questionElapsed }
+        return questionElapsed + max(0, ProcessInfo.processInfo.systemUptime - started)
+    }
+
+    private func beginQuestionTimingIfNeeded() {
+        guard engine.state == .answering, let roundID = engine.round?.id else { return }
+        if timedRoundID != roundID {
+            timedRoundID = roundID
+            questionElapsed = 0
+            questionTimingStartedAt = nil
+        }
+        resumeQuestionTimingIfPossible()
+    }
+
+    private func resumeQuestionTimingIfPossible() {
+        guard questionTimingStartedAt == nil,
+              sceneIsActive, !isPaused, !isStageTransitioning,
+              engine.state == .answering else { return }
+        questionTimingStartedAt = ProcessInfo.processInfo.systemUptime
+    }
+
+    @discardableResult
+    private func suspendQuestionTiming() -> TimeInterval {
+        if let started = questionTimingStartedAt {
+            questionElapsed += max(0, ProcessInfo.processInfo.systemUptime - started)
+            questionTimingStartedAt = nil
+        }
+        return questionElapsed
+    }
+
+    private func resetQuestionTiming() {
+        timedRoundID = nil
+        questionElapsed = 0
+        questionTimingStartedAt = nil
+    }
+
+    private func recordAnswerPace(elapsed: TimeInterval) {
+        let allowance = Double(max(1, secondsPerQuestion))
+        let ratio = elapsed / allowance
+        let pace: AnswerPace
+        if ratio < 0.75 {
+            pace = .fast
+        } else if ratio < 1.50 {
+            pace = .steady
+        } else {
+            pace = .slow
+        }
+        answerPaces.append(pace)
     }
 
     private func set<Value: Equatable>(_ keyPath: ReferenceWritableKeyPath<GameViewModel, Value>,
