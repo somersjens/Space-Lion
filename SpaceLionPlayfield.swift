@@ -117,6 +117,20 @@ private final class LionPoseImageCache: @unchecked Sendable {
 }
 #endif
 
+/// The destination is shared by every gameplay surface; the fifth stop is
+/// selected from the actual playable character, including premium characters.
+private enum SpaceDestinationArt {
+    static let firstWorlds = ["space_destination_earth", "space_destination_rust",
+                              "space_destination_rings", "space_destination_crystal"]
+    static let asteroids = ["space_asteroid_rock", "space_asteroid_iron"]
+
+    static func name(stage: Int, characterID: String) -> String {
+        let destination = (max(1, stage) - 1) % 5
+        if destination < firstWorlds.count { return firstWorlds[destination] }
+        return "space_heaven_\(characterID)"
+    }
+}
+
 private struct SpaceAnswerBurstState: Identifiable {
     let id = UUID()
     let point: CGPoint
@@ -177,11 +191,12 @@ struct SpaceLionPlayfield: View {
     @State private var celebrationSpin = 0.0
     @State private var travelShakePhase: CGFloat = 0
 
-    /// Called from the menu, before a level is presented, so every pose of the
-    /// selected character is decompressed before the flight animation needs it.
+    /// Decode the selected poses, opening world and rock sprites while the
+    /// menu is idle, before the gameplay animation needs them.
     static func prewarmArtwork(for character: AnimalCharacter) {
 #if canImport(UIKit)
         let names = LionPose.allCases.map { character.gameplayAsset(frame: $0.frame) }
+            + [SpaceDestinationArt.firstWorlds[0]] + SpaceDestinationArt.asteroids
         LionPoseImageCache.shared.prepare(names: names)
 #endif
     }
@@ -1659,10 +1674,8 @@ private struct SpaceshipCockpit: View {
 
     var body: some View {
         ZStack {
-            // The hull, nebula, planet and control sockets do not change from
-            // frame to frame. Keeping them in their own canvas prevents the
-            // animation clock from rebuilding hundreds of paths and gradients
-            // just to move a few small lights.
+            // The hull, destination artwork and control sockets remain in a
+            // static canvas while only glints, stones and lights animate.
             Canvas(opaque: true, rendersAsynchronously: true) { context, size in
                 drawStatic(in: context, size: size)
             }
@@ -1679,7 +1692,7 @@ private struct SpaceshipCockpit: View {
             // animation paths, so neither needs to inherit this low cadence.
             TimelineView(.animation(minimumInterval: SpaceAnimationBudget.sceneryInterval,
                                     paused: !isRunning)) { timeline in
-                let time = timeline.date.timeIntervalSinceReferenceDate
+                let time = isRunning ? timeline.date.timeIntervalSinceReferenceDate : 0
                 Canvas(rendersAsynchronously: true) { context, size in
                     drawAnimated(in: context, size: size, time: time)
                 }
@@ -1802,15 +1815,15 @@ private struct SpaceshipCockpit: View {
         let sceneryWindow = window.insetBy(dx: sceneryInset, dy: sceneryInset)
         let sceneryCut = max(2, cut - sceneryInset * 0.55)
 
-        // Stars are the only moving part behind the glass. The much heavier
-        // nebula and planet remain in the static canvas below.
+        // Small glints and textured rocks move above the static destination
+        // artwork; the full scene is never repainted by this animation clock.
         context.drawLayer { space in
             space.clip(to: chamfered(sceneryWindow, cut: sceneryCut))
             drawStars(in: space, window: sceneryWindow, time: time)
-            drawAsteroids(in: space, window: sceneryWindow, time: time)
-            drawAtmosphereShimmer(in: space, window: window, time: time)
+            if destination != 5 {
+                drawAsteroids(in: space, window: sceneryWindow, time: time)
+            }
             drawSpaceDust(in: space, window: sceneryWindow, time: time)
-            drawGalaxyShimmer(in: space, window: window, time: time)
         }
 
         drawConduitAnimations(in: context, window: window, time: time)
@@ -2883,48 +2896,33 @@ private struct SpaceshipCockpit: View {
 
     // MARK: Windshield
 
+    private func artworkImage(named name: String) -> Image {
+#if canImport(UIKit)
+        if let prepared = LionPoseImageCache.shared.image(named: name) {
+            return Image(uiImage: prepared)
+        }
+#endif
+        return Image(name)
+    }
+
     private func drawSpace(in context: GraphicsContext, window: CGRect, cut: CGFloat, time: TimeInterval) {
         let glass = chamfered(window, cut: cut)
         context.drawLayer { space in
             space.clip(to: glass)
-            let sky: [Color]
-            switch destination {
-            case 2:
-                sky = [Color(red: 0.10, green: 0.012, blue: 0.035),
-                       Color(red: 0.25, green: 0.035, blue: 0.055),
-                       Color(red: 0.06, green: 0.02, blue: 0.12),
-                       Color(red: 0.015, green: 0.01, blue: 0.045)]
-            case 3:
-                sky = [Color(red: 0.025, green: 0.018, blue: 0.10),
-                       Color(red: 0.12, green: 0.075, blue: 0.24),
-                       Color(red: 0.20, green: 0.11, blue: 0.22),
-                       Color(red: 0.025, green: 0.02, blue: 0.08)]
-            case 4:
-                sky = [Color(red: 0.005, green: 0.055, blue: 0.11),
-                       Color(red: 0.015, green: 0.19, blue: 0.27),
-                       Color(red: 0.02, green: 0.10, blue: 0.25),
-                       Color(red: 0.005, green: 0.025, blue: 0.08)]
-            case 5:
-                sky = [Color(red: 0.10, green: 0.008, blue: 0.10),
-                       Color(red: 0.30, green: 0.025, blue: 0.16),
-                       Color(red: 0.12, green: 0.025, blue: 0.25),
-                       Color(red: 0.025, green: 0.008, blue: 0.055)]
-            default:
-                sky = [Color(red: 0.01, green: 0.01, blue: 0.07),
-                       Color(red: 0.02, green: 0.03, blue: 0.16),
-                       Color(red: 0.03, green: 0.08, blue: 0.28),
-                       Color(red: 0.01, green: 0.04, blue: 0.14)]
-            }
-            space.fill(Path(window),
-                       with: .linearGradient(Gradient(colors: sky),
-                                             startPoint: CGPoint(x: window.minX, y: window.minY),
-                                             endPoint: CGPoint(x: window.maxX, y: window.maxY)))
-            if destination == 1 {
-                drawVortex(in: space, window: window)
-            } else {
-                drawDestinationBeacon(in: space, window: window)
-            }
-            drawPlanet(in: space, window: window, time: time)
+            let asset = SpaceDestinationArt.name(stage: destinationStage, characterID: character.id)
+            let art = context.resolve(artworkImage(named: asset))
+            // Aspect-fill the authored scene instead of stretching the sphere.
+            // The same composition covers narrow phones and wider tablet panes.
+            let scale = max(window.width / art.size.width, window.height / art.size.height)
+            let imageSize = CGSize(width: art.size.width * scale, height: art.size.height * scale)
+            // Tablet panes are almost square. Keep the food world's right
+            // silhouette inside the pane; Earth's galaxy needs a leftward crop.
+            let alignment: CGFloat = window.width / window.height < 1.25
+                ? (destination == 1 ? 0.35 : 1.0) : 0.5
+            let imageRect = CGRect(x: window.minX - (imageSize.width - window.width) * alignment,
+                                   y: window.midY - imageSize.height / 2,
+                                   width: imageSize.width, height: imageSize.height)
+            space.draw(art, in: imageRect)
 
             for (width, opacity) in [(3.0, 0.16), (2.0, 0.20), (1.4, 0.28)] as [(CGFloat, Double)] {
                 space.stroke(glass, with: .color(.black.opacity(opacity)), lineWidth: frameWidth * width)
@@ -2947,362 +2945,11 @@ private struct SpaceshipCockpit: View {
         }
     }
 
-    /// A real spiral composition rather than a purple fog bank. Every arm is
-    /// a path made from deterministic points, then layered as shadow, gas,
-    /// plasma and dust. It stays crisp at every device size and costs nothing
-    /// on the animation clock because it lives on the static cockpit canvas.
-    private func drawVortex(in context: GraphicsContext, window: CGRect) {
-        let centre = CGPoint(x: window.minX + window.width * 0.215,
-                             y: window.minY + window.height * 0.285)
-        let violet = Color(red: 0.46, green: 0.18, blue: 1.00)
-        let electricPurple = Color(red: 0.74, green: 0.38, blue: 1.00)
-        let magenta = Color(red: 1.00, green: 0.34, blue: 0.78)
-        let rose = Color(red: 1.00, green: 0.64, blue: 0.80)
-        let warmWhite = Color(red: 1.00, green: 0.94, blue: 0.84)
-        let armCount = 4
-        let steps = 84
-
-        func spiralPath(arm: Int, phaseOffset: CGFloat = 0) -> Path {
-            var path = Path()
-            for step in 0...steps {
-                let t = CGFloat(step) / CGFloat(steps)
-                let phase = CGFloat(arm) / CGFloat(armCount) * .pi * 2
-                let angle = phase + phaseOffset - 0.72 + t * .pi * 3.10
-                let radius = window.height * (0.012 + pow(t, 1.20) * 0.235)
-                // A shallow ellipse tilts the vortex into the scene, while a
-                // slight ripple keeps the arms from looking CAD-perfect.
-                let ripple = 1 + sin(t * .pi * 7 + CGFloat(arm)) * 0.018
-                let point = CGPoint(
-                    x: centre.x + cos(angle) * radius * 1.22 * ripple,
-                    y: centre.y + sin(angle) * radius * 0.64 * ripple
-                )
-                step == 0 ? path.move(to: point) : path.addLine(to: point)
-            }
-            return path
-        }
-
-        // Large, low-opacity gas envelope behind the structured arms.
-        var envelope = context
-        envelope.blendMode = .plusLighter
-        envelope.fill(Path(ellipseIn: CGRect(x: centre.x - window.height * 0.245,
-                                              y: centre.y - window.height * 0.155,
-                                              width: window.height * 0.49,
-                                              height: window.height * 0.31)),
-                      with: .radialGradient(Gradient(stops: [
-                        .init(color: magenta.opacity(0.13), location: 0),
-                        .init(color: violet.opacity(0.13), location: 0.46),
-                        .init(color: electricPurple.opacity(0.05), location: 0.74),
-                        .init(color: .clear, location: 1)
-                      ]), center: centre, startRadius: 0,
-                      endRadius: window.height * 0.26))
-
-        // Dark lanes run just beside the light paths. They separate each arm
-        // and create the curled, tunnel-like depth missing from the old haze.
-        var lanes = context
-        lanes.blendMode = .multiply
-        for arm in 0..<armCount {
-            lanes.stroke(spiralPath(arm: arm, phaseOffset: 0.10),
-                         with: .color(Color(red: 0.01, green: 0.005, blue: 0.055).opacity(0.52)),
-                         style: StrokeStyle(lineWidth: window.height * 0.016,
-                                            lineCap: .round,
-                                            lineJoin: .round))
-        }
-
-        for arm in 0..<armCount {
-            let path = spiralPath(arm: arm)
-            let armColor = arm.isMultiple(of: 2) ? magenta : electricPurple
-
-            context.drawLayer { gas in
-                gas.blendMode = .plusLighter
-                gas.addFilter(.blur(radius: window.height * 0.022))
-                gas.stroke(path,
-                           with: .color(armColor.opacity(0.24)),
-                           style: StrokeStyle(lineWidth: window.height * 0.048,
-                                              lineCap: .round,
-                                              lineJoin: .round))
-            }
-
-            context.drawLayer { plasma in
-                plasma.blendMode = .plusLighter
-                plasma.addFilter(.blur(radius: window.height * 0.006))
-                plasma.stroke(path,
-                              with: .linearGradient(Gradient(stops: [
-                                .init(color: warmWhite.opacity(0.78), location: 0),
-                                .init(color: rose.opacity(0.64), location: 0.18),
-                                .init(color: armColor.opacity(0.48), location: 0.55),
-                                .init(color: violet.opacity(0.07), location: 1)
-                              ]), startPoint: centre,
-                              endPoint: CGPoint(x: window.minX,
-                                                y: window.maxY)),
-                              style: StrokeStyle(lineWidth: window.height * 0.011,
-                                                 lineCap: .round,
-                                                 lineJoin: .round))
-            }
-
-            var filament = context
-            filament.blendMode = .plusLighter
-            filament.stroke(path,
-                            with: .linearGradient(Gradient(stops: [
-                                .init(color: .white.opacity(0.82), location: 0),
-                                .init(color: rose.opacity(0.64), location: 0.22),
-                                .init(color: electricPurple.opacity(0.36), location: 0.66),
-                                .init(color: .clear, location: 1)
-                            ]), startPoint: centre,
-                            endPoint: CGPoint(x: window.minX,
-                                              y: window.maxY)),
-                            style: StrokeStyle(lineWidth: max(0.9, window.height * 0.0032),
-                                               lineCap: .round,
-                                               lineJoin: .round))
-        }
-
-        // Dense dust follows the same spiral equation, so the grains reinforce
-        // the motion rather than reading as generic random stars.
-        var dust = context
-        dust.blendMode = .plusLighter
-        for index in 0..<170 {
-            let arm = index % armCount
-            let t = 0.08 + random(index, 111) * 0.92
-            let phase = CGFloat(arm) / CGFloat(armCount) * .pi * 2
-            let angle = phase - 0.72 + t * .pi * 3.10
-            let baseRadius = window.height * (0.012 + pow(t, 1.20) * 0.235)
-            let scatter = (random(index, 112) - 0.5) * window.height * (0.010 + t * 0.017)
-            let radius = baseRadius + scatter
-            let point = CGPoint(x: centre.x + cos(angle) * radius * 1.22,
-                                y: centre.y + sin(angle) * radius * 0.64)
-            let dot = 0.45 + random(index, 113) * (isPad ? 1.75 : 1.20)
-            let color = index.isMultiple(of: 7) ? warmWhite
-                : (index.isMultiple(of: 3) ? rose : electricPurple)
-            dust.fill(Path(ellipseIn: CGRect(x: point.x - dot * 0.5,
-                                              y: point.y - dot * 0.5,
-                                              width: dot, height: dot)),
-                      with: .color(color.opacity(0.24 + Double(random(index, 114)) * 0.40)))
-        }
-
-        // Layered hot core and a small dark centre make the vortex feel like a
-        // deep funnel while retaining the friendly, luminous reference mood.
-        var core = context
-        core.blendMode = .plusLighter
-        let coreRadius = window.height * 0.064
-        core.fill(Path(ellipseIn: CGRect(x: centre.x - coreRadius * 1.30,
-                                         y: centre.y - coreRadius * 0.72,
-                                         width: coreRadius * 2.60,
-                                         height: coreRadius * 1.44)),
-                  with: .radialGradient(Gradient(stops: [
-                    .init(color: .white.opacity(0.90), location: 0),
-                    .init(color: warmWhite.opacity(0.74), location: 0.18),
-                    .init(color: rose.opacity(0.42), location: 0.43),
-                    .init(color: magenta.opacity(0.16), location: 0.70),
-                    .init(color: .clear, location: 1)
-                  ]), center: centre, startRadius: 0,
-                  endRadius: coreRadius * 1.30))
-        context.fill(Path(ellipseIn: CGRect(x: centre.x - coreRadius * 0.18,
-                                            y: centre.y - coreRadius * 0.10,
-                                            width: coreRadius * 0.36,
-                                            height: coreRadius * 0.20)),
-                     with: .color(Color(red: 0.12, green: 0.025, blue: 0.22).opacity(0.62)))
-    }
-
-    /// Each later sector gets a different distant light source as well as a
-    /// different planet, so the full view changes rather than merely recolours.
-    private func drawDestinationBeacon(in context: GraphicsContext, window: CGRect) {
-        let centre: CGPoint
-        let color: Color
-        switch destination {
-        case 2:
-            centre = CGPoint(x: window.minX + window.width * 0.18,
-                             y: window.minY + window.height * 0.24)
-            color = Color(red: 1.00, green: 0.32, blue: 0.16)
-        case 3:
-            centre = CGPoint(x: window.minX + window.width * 0.26,
-                             y: window.minY + window.height * 0.62)
-            color = Color(red: 1.00, green: 0.76, blue: 0.32)
-        case 4:
-            centre = CGPoint(x: window.minX + window.width * 0.20,
-                             y: window.minY + window.height * 0.30)
-            color = Color(red: 0.38, green: 1.00, blue: 0.94)
-        default:
-            centre = CGPoint(x: window.minX + window.width * 0.25,
-                             y: window.minY + window.height * 0.22)
-            color = Color(red: 1.00, green: 0.22, blue: 0.68)
-        }
-        let radius = window.height * (destination == 3 ? 0.065 : 0.045)
-        var glow = context
-        glow.blendMode = .plusLighter
-        glow.fill(Path(ellipseIn: CGRect(x: centre.x - radius * 4,
-                                         y: centre.y - radius * 4,
-                                         width: radius * 8,
-                                         height: radius * 8)),
-                  with: .radialGradient(Gradient(colors: [color.opacity(0.56),
-                                                          color.opacity(0.13),
-                                                          .clear]),
-                                        center: centre,
-                                        startRadius: 0,
-                                        endRadius: radius * 4))
-        glow.fill(Path(ellipseIn: CGRect(x: centre.x - radius,
-                                         y: centre.y - radius,
-                                         width: radius * 2,
-                                         height: radius * 2)),
-                  with: .radialGradient(Gradient(colors: [.white, color]),
-                                        center: centre,
-                                        startRadius: 0,
-                                        endRadius: radius))
-
-        if destination == 4 {
-            for band in 0..<3 {
-                var aurora = Path()
-                let y = window.minY + window.height * (0.18 + CGFloat(band) * 0.12)
-                aurora.move(to: CGPoint(x: window.minX, y: y))
-                aurora.addCurve(to: CGPoint(x: window.maxX, y: y + window.height * 0.08),
-                                control1: CGPoint(x: window.minX + window.width * 0.35,
-                                                  y: y + window.height * 0.15),
-                                control2: CGPoint(x: window.minX + window.width * 0.68,
-                                                  y: y - window.height * 0.10))
-                glow.stroke(aurora,
-                            with: .color(color.opacity(0.16 - Double(band) * 0.03)),
-                            style: StrokeStyle(lineWidth: window.height * 0.035,
-                                               lineCap: .round))
-            }
-        }
-    }
-
-    private func drawNebula(in context: GraphicsContext, window: CGRect) {
-        let violet = Color(red: 0.48, green: 0.20, blue: 0.98)
-        let fuchsia = Color(red: 0.92, green: 0.24, blue: 0.78)
-        let ice = Color(red: 0.70, green: 0.82, blue: 1.00)
-        let origin = CGPoint(x: window.minX + window.width * 0.27,
-                             y: window.minY + window.height * 0.37)
-
-        // The nebula is built from long, blurred ribbons instead of a cloud of
-        // circles. That gives it a recognisable current and keeps it from
-        // reading as one undefined purple object behind the gameplay.
-        var upperRibbon = Path()
-        upperRibbon.move(to: CGPoint(x: window.minX - window.width * 0.08,
-                                     y: window.minY + window.height * 0.61))
-        upperRibbon.addCurve(to: CGPoint(x: window.minX + window.width * 0.42,
-                                         y: window.minY + window.height * 0.28),
-                             control1: CGPoint(x: window.minX + window.width * 0.08,
-                                               y: window.minY + window.height * 0.60),
-                             control2: CGPoint(x: window.minX + window.width * 0.19,
-                                               y: window.minY + window.height * 0.22))
-        upperRibbon.addCurve(to: CGPoint(x: window.minX + window.width * 0.78,
-                                         y: window.minY + window.height * 0.16),
-                             control1: CGPoint(x: window.minX + window.width * 0.56,
-                                               y: window.minY + window.height * 0.34),
-                             control2: CGPoint(x: window.minX + window.width * 0.66,
-                                               y: window.minY + window.height * 0.12))
-
-        var lowerRibbon = Path()
-        lowerRibbon.move(to: CGPoint(x: window.minX - window.width * 0.10,
-                                     y: window.minY + window.height * 0.78))
-        lowerRibbon.addCurve(to: CGPoint(x: window.minX + window.width * 0.36,
-                                         y: window.minY + window.height * 0.43),
-                             control1: CGPoint(x: window.minX + window.width * 0.08,
-                                               y: window.minY + window.height * 0.72),
-                             control2: CGPoint(x: window.minX + window.width * 0.14,
-                                               y: window.minY + window.height * 0.36))
-        lowerRibbon.addCurve(to: CGPoint(x: window.minX + window.width * 0.72,
-                                         y: window.minY + window.height * 0.34),
-                             control1: CGPoint(x: window.minX + window.width * 0.50,
-                                               y: window.minY + window.height * 0.55),
-                             control2: CGPoint(x: window.minX + window.width * 0.61,
-                                               y: window.minY + window.height * 0.27))
-
-        context.drawLayer { haze in
-            haze.blendMode = .plusLighter
-            haze.addFilter(.blur(radius: window.height * 0.035))
-            haze.stroke(upperRibbon,
-                        with: .linearGradient(Gradient(colors: [violet.opacity(0),
-                                                                 violet.opacity(0.34),
-                                                                 fuchsia.opacity(0.25),
-                                                                 ice.opacity(0)]),
-                                              startPoint: CGPoint(x: window.minX, y: origin.y),
-                                              endPoint: CGPoint(x: window.maxX, y: origin.y)),
-                        style: StrokeStyle(lineWidth: window.height * 0.18,
-                                           lineCap: .round,
-                                           lineJoin: .round))
-            haze.stroke(lowerRibbon,
-                        with: .linearGradient(Gradient(colors: [fuchsia.opacity(0),
-                                                                 fuchsia.opacity(0.24),
-                                                                 violet.opacity(0.28),
-                                                                 violet.opacity(0)]),
-                                              startPoint: CGPoint(x: window.minX, y: origin.y),
-                                              endPoint: CGPoint(x: window.maxX, y: origin.y)),
-                        style: StrokeStyle(lineWidth: window.height * 0.13,
-                                           lineCap: .round,
-                                           lineJoin: .round))
-        }
-
-        context.drawLayer { filaments in
-            filaments.blendMode = .plusLighter
-            filaments.addFilter(.blur(radius: window.height * 0.010))
-            filaments.stroke(upperRibbon,
-                             with: .linearGradient(Gradient(colors: [violet.opacity(0),
-                                                                      ice.opacity(0.22),
-                                                                      fuchsia.opacity(0.34),
-                                                                      violet.opacity(0)]),
-                                                   startPoint: CGPoint(x: window.minX, y: origin.y),
-                                                   endPoint: CGPoint(x: window.maxX, y: origin.y)),
-                             style: StrokeStyle(lineWidth: window.height * 0.032,
-                                                lineCap: .round,
-                                                lineJoin: .round))
-            filaments.stroke(lowerRibbon,
-                             with: .color(violet.opacity(0.23)),
-                             style: StrokeStyle(lineWidth: window.height * 0.022,
-                                                lineCap: .round,
-                                                lineJoin: .round))
-        }
-
-        // A dark seam provides contrast and makes the coloured gas feel
-        // layered instead of uniformly luminous.
-        var dustLane = context
-        dustLane.blendMode = .multiply
-        dustLane.stroke(upperRibbon,
-                        with: .color(Color(red: 0.02, green: 0.01, blue: 0.10).opacity(0.46)),
-                        style: StrokeStyle(lineWidth: window.height * 0.018,
-                                           lineCap: .round,
-                                           lineJoin: .round))
-
-        var core = context
-        core.blendMode = .plusLighter
-        let coreRadius = window.height * 0.15
-        core.fill(Path(ellipseIn: CGRect(x: origin.x - coreRadius,
-                                         y: origin.y - coreRadius * 0.62,
-                                         width: coreRadius * 2,
-                                         height: coreRadius * 1.24)),
-                  with: .radialGradient(Gradient(stops: [
-                    .init(color: .white.opacity(0.62), location: 0),
-                    .init(color: ice.opacity(0.26), location: 0.20),
-                    .init(color: fuchsia.opacity(0.20), location: 0.48),
-                    .init(color: violet.opacity(0), location: 1)
-                  ]),
-                  center: origin,
-                  startRadius: 0,
-                  endRadius: coreRadius))
-
-        // Dust follows the same two currents, with dense grains near the core
-        // and sparse blue-violet grains at the tips.
-        let dust = Color(red: 0.91, green: 0.92, blue: 1.00)
-        for index in 0..<190 {
-            let t = random(index, 11)
-            let branch = index.isMultiple(of: 2) ? -1.0 : 1.0
-            let x = window.minX + window.width * (-0.04 + t * 0.80)
-            let wave = sin(Double(t) * .pi * 2.15 + branch * 0.55)
-            let centreY = window.minY + window.height * (0.50 - t * 0.34 + CGFloat(wave) * 0.10)
-            let spread = (random(index, 12) - 0.5) * window.height * (0.05 + t * 0.08)
-            let y = centreY + spread * CGFloat(branch)
-            let dot = 0.35 + random(index, 14) * (isPad ? 1.45 : 1.05)
-            let tint = index.isMultiple(of: 6) ? ice : dust
-            core.fill(Path(ellipseIn: CGRect(x: x - dot / 2, y: y - dot / 2,
-                                             width: dot, height: dot)),
-                      with: .color(tint.opacity(0.20 + Double(random(index, 15)) * 0.58)))
-        }
-    }
-
     private func drawStars(in context: GraphicsContext, window: CGRect, time: TimeInterval) {
         var glow = context
         glow.blendMode = .plusLighter
         let count = min(Self.starSamples.count,
-                        Int(window.width * window.height / 2_000))
+                        Int(window.width * window.height / 9_000))
         for index in 0..<count {
             let sample = Self.starSamples[index]
             let depth = sample.depth
@@ -3332,239 +2979,34 @@ private struct SpaceshipCockpit: View {
         }
     }
 
-    /// Three loose asteroid families drift together. A larger leader and a
-    /// trail of differently sized companions makes every pass read as a small
-    /// field rather than a row of evenly spaced decorative rocks.
-    private func drawAsteroids(in context: GraphicsContext,
-                               window: CGRect,
-                               time: TimeInterval) {
-        // Six varied rocks retain the three drifting families without
-        // rebuilding a dense set of multi-path objects every scenery tick.
-        let groupSizes = [2, 2, 2]
-        let groupLanes: [CGFloat] = [0.22, 0.72, 0.45]
-        var index = 0
-
-        for group in groupSizes.indices {
-            let direction: CGFloat = group == 1 ? -1 : 1
-            let groupDepth = 0.55 + random(group, 71) * 0.34
-            let travel = CGFloat(time) * (0.0048 + groupDepth * 0.0078) * direction
-            let groupX = random(group, 72) + travel
-
-            for member in 0..<groupSizes[group] {
-                let isLeader = member == 0
-                let memberOffsetX: CGFloat = isLeader
-                    ? 0
-                    : (random(index, 73) - 0.5) * 0.13 - direction * CGFloat(member) * 0.018
-                let x = window.minX + wrap(groupX + memberOffsetX) * window.width
-                let laneJitter: CGFloat = isLeader
-                    ? 0
-                    : (random(index, 74) - 0.5) * 0.15
-                let baseY = window.minY + (groupLanes[group] + laneJitter) * window.height
-                let depth = min(1, max(0.32,
-                    groupDepth + (random(index, 75) - 0.5) * 0.20))
-                let y = baseY + sin(time * (0.22 + Double(depth) * 0.16)
-                                    + Double(group * 2 + member)) * window.height * 0.009
-                let radius = window.height * (isLeader
-                    ? 0.038 + groupDepth * 0.020
-                    : 0.010 + random(index, 76) * 0.023)
-            let rotationDirection: CGFloat = index.isMultiple(of: 2) ? -1 : 1
-                let rotation = CGFloat(time) * (0.050 + random(index, 77) * 0.090) * rotationDirection
-                let squash = 0.76 + random(index, 78) * 0.34
-
-            var points: [CGPoint] = []
-                let vertexCount = radius > window.height * 0.027 ? 9 : 7
-                for vertex in 0..<vertexCount {
-                let angle = CGFloat(vertex) / CGFloat(vertexCount) * .pi * 2 + rotation
-                    let variance = 0.72 + random(index * 12 + vertex, 79) * 0.38
-                points.append(CGPoint(x: x + cos(angle) * radius * variance,
-                                      y: y + sin(angle) * radius * variance * squash))
-            }
-
-            var rock = Path()
-            for (vertex, point) in points.enumerated() {
-                vertex == 0 ? rock.move(to: point) : rock.addLine(to: point)
-            }
-            rock.closeSubpath()
-
-            let edgeTint = x < window.midX
-                ? Color(red: 0.92, green: 0.32, blue: 0.86)
-                : Color(red: 0.28, green: 0.80, blue: 1.00)
-
-            // The closest rocks carry a short, soft parallax wake. It makes
-            // their horizontal flight clear without resorting to long speed
-            // lines that would compete with the question and character.
-                if isLeader && depth > 0.66 {
-                var wakeContext = context
-                wakeContext.blendMode = .plusLighter
-                var wake = Path()
-                wake.move(to: CGPoint(x: x - direction * radius * 3.2, y: y))
-                wake.addLine(to: CGPoint(x: x - direction * radius * 0.75, y: y))
-                wakeContext.stroke(wake,
-                                   with: .linearGradient(Gradient(colors: [
-                                    edgeTint.opacity(0), edgeTint.opacity(0.22)
-                                   ]),
-                                   startPoint: CGPoint(x: x - direction * radius * 3.2, y: y),
-                                   endPoint: CGPoint(x: x - direction * radius * 0.75, y: y)),
-                                   style: StrokeStyle(lineWidth: radius * 0.46,
-                                                      lineCap: .round))
-            }
-
-                if depth > 0.72 {
-                var halo = context
-                halo.blendMode = .plusLighter
-                halo.stroke(rock, with: .color(edgeTint.opacity(0.11)), lineWidth: radius * 0.34)
-            }
-
-            context.fill(rock,
-                         with: .linearGradient(Gradient(stops: [
-                            .init(color: Color(red: 0.72, green: 0.66, blue: 0.64), location: 0),
-                            .init(color: Color(red: 0.34, green: 0.29, blue: 0.32), location: 0.38),
-                            .init(color: Color(red: 0.12, green: 0.09, blue: 0.14), location: 0.72),
-                            .init(color: Color(red: 0.025, green: 0.02, blue: 0.055), location: 1)
-                         ]),
-                         startPoint: CGPoint(x: x - radius * 0.75, y: y - radius),
-                         endPoint: CGPoint(x: x + radius, y: y + radius)))
-
-            // Broad mineral facets break up the computer-perfect polygon and
-            // stay legible even on the smaller iPhone playfield.
-                let facetCount = radius > window.height * 0.027 ? 4 : 2
-                for facet in 0..<facetCount {
-                let first = (facet * 2 + index) % points.count
-                let second = (first + 1 + facet % 2) % points.count
-                var face = Path()
-                face.move(to: CGPoint(x: x + (random(index + facet, 90) - 0.5) * radius * 0.20,
-                                      y: y + (random(index + facet, 91) - 0.5) * radius * 0.16))
-                face.addLine(to: points[first])
-                face.addLine(to: points[second])
-                face.closeSubpath()
-                let facetColor = facet.isMultiple(of: 2)
-                    ? edgeTint.opacity(0.055 + Double(depth) * 0.055)
-                    : Color(red: 0.13, green: 0.08, blue: 0.18).opacity(0.34)
-                context.fill(face, with: .color(facetColor))
-            }
-
-            var litRim = Path()
-                let rimStart = max(0, points.count - 4)
-                litRim.move(to: points[rimStart])
-                for vertex in (rimStart + 1)..<points.count { litRim.addLine(to: points[vertex]) }
-            litRim.addLine(to: points[0])
-            context.stroke(litRim,
-                           with: .color(edgeTint.opacity(0.34 + Double(depth) * 0.30)),
-                           lineWidth: depth > 0.7 ? 1.35 : 0.75)
-            context.stroke(rock, with: .color(.black.opacity(0.55)), lineWidth: depth > 0.7 ? 1.1 : 0.65)
-
-                let relativeSize = radius / window.height
-                let craterCount = relativeSize > 0.040 ? 3 : (relativeSize > 0.024 ? 2 : 1)
-                for crater in 0..<craterCount {
-                let craterRadius = radius * (0.11 + random(index * 5 + crater, 82) * 0.14)
-                let craterPoint = CGPoint(x: x + (random(index * 7 + crater, 83) - 0.54) * radius * 0.68,
-                                          y: y + (random(index * 9 + crater, 84) - 0.52) * radius * 0.48)
-                let craterRect = CGRect(x: craterPoint.x - craterRadius,
-                                        y: craterPoint.y - craterRadius * 0.66,
-                                        width: craterRadius * 2,
-                                        height: craterRadius * 1.32)
-                context.fill(Path(ellipseIn: craterRect),
-                             with: .radialGradient(Gradient(colors: [Color.black.opacity(0.48),
-                                                                      Color.black.opacity(0.12)]),
-                                                   center: CGPoint(x: craterPoint.x + craterRadius * 0.18,
-                                                                   y: craterPoint.y + craterRadius * 0.12),
-                                                   startRadius: 0,
-                                                   endRadius: craterRadius))
-                    context.stroke(Path(ellipseIn: craterRect),
-                                   with: .color(.black.opacity(0.48)),
-                                   lineWidth: max(0.55, radius * 0.055))
-                    let craterHighlight = Path(ellipseIn: craterRect.offsetBy(dx: -craterRadius * 0.10,
-                                                                              dy: -craterRadius * 0.10))
-                    context.stroke(craterHighlight,
-                                   with: .color(edgeTint.opacity(0.16 + Double(depth) * 0.10)),
-                                   lineWidth: max(0.45, radius * 0.035))
-            }
-
-            // Close foreground rocks shed a few tiny fragments in the opposite
-            // direction of travel, reinforcing speed without adding streaks.
-                if isLeader && depth > 0.70 {
-                for fragment in 0..<3 {
-                    let gap = radius * (1.30 + CGFloat(fragment) * 0.42)
-                    let fx = x - gap * direction
-                    let fy = y + (random(index * 3 + fragment, 96) - 0.5) * radius
-                    let dot = radius * (0.055 + random(fragment, 97) * 0.045)
-                    context.fill(Path(ellipseIn: CGRect(x: fx - dot, y: fy - dot,
-                                                        width: dot * 2, height: dot * 2)),
-                                 with: .color(Color(red: 0.55, green: 0.57, blue: 0.66)
-                                    .opacity(0.25 + Double(depth) * 0.25)))
-                }
-            }
-                index += 1
-            }
-        }
-    }
-
-    private func planetGeometry(in window: CGRect) -> (centre: CGPoint, radius: CGFloat) {
-        let radiusScale: CGFloat
-        let x: CGFloat
-        let y: CGFloat
-        switch destination {
-        case 2: (radiusScale, x, y) = (0.70, 0.88, 0.83)
-        case 3: (radiusScale, x, y) = (0.60, 0.78, 0.58)
-        case 4: (radiusScale, x, y) = (0.69, 0.87, 0.77)
-        case 5: (radiusScale, x, y) = (0.76, 0.86, 0.86)
-        default: (radiusScale, x, y) = (0.84, 0.94, 1.30)
-        }
-        let radius = min(window.height * radiusScale, window.width * 0.44)
-        return (CGPoint(x: window.minX + window.width * x,
-                        y: window.minY + window.height * y), radius)
-    }
-
-    /// A very faint animated rim over the planet suggests slow atmospheric
-    /// rotation while keeping the expensive planet texture on the static layer.
-    private func drawAtmosphereShimmer(in context: GraphicsContext,
-                                       window: CGRect,
-                                       time: TimeInterval) {
-        let geometry = planetGeometry(in: window)
-        let radius = geometry.radius
-        let centre = geometry.centre
-        let disc = CGRect(x: centre.x - radius, y: centre.y - radius,
-                          width: radius * 2, height: radius * 2)
-        var glow = context
-        glow.blendMode = .plusLighter
-        let start = Angle.radians(time * 0.05)
-        let end = Angle.radians(time * 0.05 + 1.15)
-        let arc = Path { path in
-            path.addArc(center: centre,
-                        radius: radius * 1.008,
-                        startAngle: start,
-                        endAngle: end,
-                        clockwise: false)
-        }
-        glow.stroke(arc, with: .color(.white.opacity(0.32)), lineWidth: isPad ? 3 : 2)
-        glow.stroke(Path(ellipseIn: disc.insetBy(dx: -radius * 0.025, dy: -radius * 0.025)),
-                    with: .color(cyan.opacity(0.07 + 0.04 * sin(time * 1.3))),
-                    lineWidth: isPad ? 10 : 7)
-
-        // Warm lights are grouped around the visible land masses. A slow,
-        // offset pulse makes them feel like living places rather than a dotted
-        // decorative ring pasted over the planet.
-        guard destination == 1 else { return }
-        let hubs = [CGPoint(x: -0.42, y: -0.46),
-                    CGPoint(x: -0.18, y: -0.57),
-                    CGPoint(x: 0.02, y: -0.44),
-                    CGPoint(x: -0.20, y: -0.18),
-                    CGPoint(x: -0.53, y: 0.05)]
-        context.drawLayer { lights in
-            lights.clip(to: Path(ellipseIn: disc))
-            lights.blendMode = .plusLighter
-            for index in 0..<20 {
-                let hub = hubs[index % hubs.count]
-                let px = centre.x + (hub.x + (random(index, 101) - 0.5) * 0.20) * radius
-                let py = centre.y + (hub.y + (random(index, 102) - 0.5) * 0.13) * radius
-                let pulse = 0.38 + 0.34 * (0.5 + 0.5 * sin(time * (0.75 + Double(random(index, 103))) + Double(index)))
-                let dot = (isPad ? 1.05 : 0.75) + random(index, 104) * (isPad ? 1.25 : 0.90)
-                let lightColor = index.isMultiple(of: 5)
-                    ? Color(red: 1.00, green: 0.93, blue: 0.72)
-                    : Color(red: 1.00, green: 0.64, blue: 0.25)
-                lights.fill(Path(ellipseIn: CGRect(x: px - dot / 2, y: py - dot / 2,
-                                                   width: dot, height: dot)),
-                            with: .color(lightColor.opacity(pulse)))
+    /// Each depth plane has its own parallax, scale, focus and drift speed.
+    /// Large blurred foreground stones pass the pane edges; sharp mid-distance
+    /// rocks show their crater texture without obscuring the character or sum.
+    private func drawAsteroids(in context: GraphicsContext, window: CGRect, time: TimeInterval) {
+        let samples: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
+            (0.02, 0.86, 0.17, 1.0), (0.94, 0.97, 0.16, 0.92),
+            (0.16, 0.39, 0.060, 0.55), (0.80, 0.20, 0.052, 0.48),
+            (0.30, 0.78, 0.036, 0.35), (0.92, 0.52, 0.042, 0.40),
+            (0.10, 0.16, 0.016, 0.18), (0.65, 0.12, 0.019, 0.22)
+        ]
+        for (index, sample) in samples.enumerated() {
+            let (baseX, baseY, size, depth) = sample
+            let direction: CGFloat = index.isMultiple(of: 2) ? 1 : -1
+            let drift = CGFloat(time) * (0.002 + depth * 0.005) * direction
+            // An overscan corridor allows rocks to leave before re-entering.
+            let x = window.minX + (wrap((baseX + drift + 0.18) / 1.36) * 1.36 - 0.18) * window.width
+            let y = window.minY + (baseY + CGFloat(sin(time * 0.09 + Double(index))) * 0.012) * window.height
+            let radius = window.height * size
+            let asset = SpaceDestinationArt.asteroids[index % SpaceDestinationArt.asteroids.count]
+            context.drawLayer { stone in
+                let blur = depth > 0.8 ? radius * 0.045 : (depth < 0.25 ? 0.65 : 0)
+                if blur > 0 { stone.addFilter(.blur(radius: blur)) }
+                stone.opacity = depth < 0.25 ? 0.72 : 0.96
+                stone.translateBy(x: x, y: y)
+                stone.rotate(by: .radians(Double(index) * 0.63 + time * 0.012 * Double(direction)))
+                stone.draw(context.resolve(artworkImage(named: asset)),
+                           in: CGRect(x: -radius, y: -radius,
+                                      width: radius * 2, height: radius * 2))
             }
         }
     }
@@ -3587,491 +3029,6 @@ private struct SpaceshipCockpit: View {
         glow.stroke(Path(ellipseIn: scanner),
                     with: .color(.white.opacity(0.18 * (1 - cockpitWrap(time * 0.22)))),
                     lineWidth: isPad ? 2 : 1.2)
-    }
-
-    private func drawPlanet(in context: GraphicsContext, window: CGRect, time: TimeInterval) {
-        if destination == 1 {
-            drawEarthPlanet(in: context, window: window, time: time)
-        } else {
-            drawStylisedPlanet(in: context, window: window)
-        }
-    }
-
-    private func drawEarthPlanet(in context: GraphicsContext, window: CGRect, time: TimeInterval) {
-        let geometry = planetGeometry(in: window)
-        let radius = geometry.radius
-        let centre = geometry.centre
-        let disc = CGRect(x: centre.x - radius, y: centre.y - radius,
-                          width: radius * 2, height: radius * 2)
-        let planet = Path(ellipseIn: disc)
-
-        var glow = context
-        glow.blendMode = .plusLighter
-        glow.fill(Path(ellipseIn: disc.insetBy(dx: -radius * 0.25, dy: -radius * 0.25)),
-                  with: .radialGradient(Gradient(stops: [
-                    .init(color: cyan.opacity(0), location: 0.68),
-                    .init(color: Color(red: 0.35, green: 0.90, blue: 1.00).opacity(0.58), location: 0.79),
-                    .init(color: blue.opacity(0.24), location: 0.89),
-                    .init(color: blue.opacity(0), location: 1)
-                  ]),
-                  center: centre,
-                  startRadius: 0,
-                  endRadius: radius * 1.25))
-
-        context.fill(planet,
-                     with: .radialGradient(Gradient(stops: [
-                        .init(color: Color(red: 0.33, green: 0.78, blue: 1.00), location: 0),
-                        .init(color: Color(red: 0.03, green: 0.42, blue: 0.78), location: 0.34),
-                        .init(color: Color(red: 0.012, green: 0.19, blue: 0.48), location: 0.67),
-                        .init(color: Color(red: 0.003, green: 0.025, blue: 0.11), location: 1)
-                     ]),
-                                           center: CGPoint(x: centre.x - radius * 0.45,
-                                                           y: centre.y - radius * 0.55),
-                                           startRadius: 0,
-                                           endRadius: radius * 1.7))
-
-        context.drawLayer { surface in
-            surface.clip(to: planet)
-
-            func earthPoint(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-                CGPoint(x: centre.x + x * radius, y: centre.y + y * radius)
-            }
-
-            // Fine ocean currents follow the curvature of the sphere. Their
-            // low contrast gives the water scale and texture without turning
-            // it into the flat blue disc from the earlier version.
-            var oceanDetails = surface
-            oceanDetails.blendMode = .plusLighter
-            for index in 0..<14 {
-                let y = -0.78 + CGFloat(index) * 0.105
-                var current = Path()
-                current.move(to: earthPoint(-0.92, y))
-                current.addCurve(to: earthPoint(0.82, y + (random(index, 121) - 0.5) * 0.10),
-                                 control1: earthPoint(-0.42, y - 0.10),
-                                 control2: earthPoint(0.28, y + 0.12))
-                oceanDetails.stroke(current,
-                                    with: .color(Color(red: 0.30, green: 0.78, blue: 0.94)
-                                        .opacity(0.035 + Double(random(index, 122)) * 0.045)),
-                                    lineWidth: max(0.45, radius * 0.004))
-            }
-
-            // Stylised but coherent coastlines. Large, joined masses read as a
-            // planet at a glance; the old collection of random ellipses looked
-            // like spots sitting on top of a blue ball.
-            var north = Path()
-            north.move(to: earthPoint(-0.93, -0.63))
-            north.addCurve(to: earthPoint(-0.62, -0.83),
-                           control1: earthPoint(-0.86, -0.79),
-                           control2: earthPoint(-0.73, -0.88))
-            north.addCurve(to: earthPoint(-0.33, -0.73),
-                           control1: earthPoint(-0.52, -0.80),
-                           control2: earthPoint(-0.43, -0.69))
-            north.addLine(to: earthPoint(-0.17, -0.56))
-            north.addLine(to: earthPoint(-0.26, -0.42))
-            north.addLine(to: earthPoint(-0.45, -0.39))
-            north.addLine(to: earthPoint(-0.52, -0.22))
-            north.addLine(to: earthPoint(-0.72, -0.30))
-            north.addLine(to: earthPoint(-0.82, -0.45))
-            north.closeSubpath()
-
-            var europeAfrica = Path()
-            europeAfrica.move(to: earthPoint(-0.36, -0.64))
-            europeAfrica.addCurve(to: earthPoint(0.02, -0.71),
-                                  control1: earthPoint(-0.23, -0.76),
-                                  control2: earthPoint(-0.08, -0.65))
-            europeAfrica.addLine(to: earthPoint(0.25, -0.55))
-            europeAfrica.addLine(to: earthPoint(0.18, -0.40))
-            europeAfrica.addLine(to: earthPoint(0.05, -0.34))
-            europeAfrica.addCurve(to: earthPoint(-0.03, 0.20),
-                                  control1: earthPoint(0.16, -0.08),
-                                  control2: earthPoint(0.10, 0.10))
-            europeAfrica.addLine(to: earthPoint(-0.22, 0.47))
-            europeAfrica.addLine(to: earthPoint(-0.35, 0.19))
-            europeAfrica.addLine(to: earthPoint(-0.43, -0.10))
-            europeAfrica.addLine(to: earthPoint(-0.56, -0.27))
-            europeAfrica.addLine(to: earthPoint(-0.45, -0.43))
-            europeAfrica.closeSubpath()
-
-            var south = Path()
-            south.move(to: earthPoint(-0.70, -0.20))
-            south.addCurve(to: earthPoint(-0.46, -0.12),
-                           control1: earthPoint(-0.62, -0.28),
-                           control2: earthPoint(-0.52, -0.23))
-            south.addLine(to: earthPoint(-0.38, 0.06))
-            south.addLine(to: earthPoint(-0.47, 0.30))
-            south.addLine(to: earthPoint(-0.54, 0.61))
-            south.addLine(to: earthPoint(-0.68, 0.74))
-            south.addLine(to: earthPoint(-0.72, 0.44))
-            south.addLine(to: earthPoint(-0.81, 0.19))
-            south.addLine(to: earthPoint(-0.84, -0.03))
-            south.closeSubpath()
-
-            var asia = Path()
-            asia.move(to: earthPoint(0.02, -0.72))
-            asia.addCurve(to: earthPoint(0.72, -0.58),
-                          control1: earthPoint(0.26, -0.84),
-                          control2: earthPoint(0.53, -0.72))
-            asia.addLine(to: earthPoint(0.86, -0.39))
-            asia.addLine(to: earthPoint(0.64, -0.25))
-            asia.addLine(to: earthPoint(0.44, -0.34))
-            asia.addLine(to: earthPoint(0.30, -0.18))
-            asia.addLine(to: earthPoint(0.15, -0.38))
-            asia.addLine(to: earthPoint(-0.02, -0.47))
-            asia.closeSubpath()
-
-            let landMasses = [north, europeAfrica, south, asia]
-            let landLight = Color(red: 0.48, green: 0.63, blue: 0.36)
-            let landMid = Color(red: 0.25, green: 0.42, blue: 0.24)
-            let landDark = Color(red: 0.075, green: 0.19, blue: 0.17)
-            for (index, land) in landMasses.enumerated() {
-                surface.fill(land,
-                             with: .linearGradient(Gradient(colors: [landLight.opacity(index == 0 ? 0.92 : 0.82),
-                                                                      landMid.opacity(0.94),
-                                                                      landDark.opacity(0.98)]),
-                                                   startPoint: earthPoint(-0.65, -0.82),
-                                                   endPoint: earthPoint(0.50, 0.55)))
-                surface.stroke(land,
-                               with: .color(Color(red: 0.17, green: 0.72, blue: 0.76).opacity(0.16)),
-                               lineWidth: max(1.4, radius * 0.018))
-                surface.stroke(land,
-                               with: .color(Color(red: 0.58, green: 0.88, blue: 0.71).opacity(0.34)),
-                               lineWidth: max(0.8, radius * 0.007))
-
-                // Deterministic micro terrain breaks up the broad gradients
-                // into forests, plateaus and dry ground while staying inside
-                // the actual coastline path.
-                for fleck in 0..<58 {
-                    let point = earthPoint(-0.95 + random(index * 70 + fleck, 123) * 1.90,
-                                           -0.88 + random(index * 70 + fleck, 124) * 1.70)
-                    guard land.contains(point) else { continue }
-                    let fleckSize = radius * (0.008 + random(fleck, 125) * 0.020)
-                    let fleckColor = fleck.isMultiple(of: 3)
-                        ? Color(red: 0.70, green: 0.53, blue: 0.28).opacity(0.27)
-                        : Color(red: 0.08, green: 0.27, blue: 0.14).opacity(0.32)
-                    surface.fill(Path(ellipseIn: CGRect(x: point.x - fleckSize,
-                                                        y: point.y - fleckSize * 0.45,
-                                                        width: fleckSize * 2,
-                                                        height: fleckSize * 0.90)),
-                                 with: .color(fleckColor))
-                }
-            }
-
-            // Mountain and desert colour variation remains clipped inside the
-            // coastlines so it enriches the land without creating new blobs.
-            surface.drawLayer { terrain in
-                terrain.clip(to: europeAfrica)
-                terrain.fill(Path(ellipseIn: CGRect(x: earthPoint(-0.27, -0.11).x - radius * 0.18,
-                                                     y: earthPoint(-0.27, -0.11).y - radius * 0.09,
-                                                     width: radius * 0.36,
-                                                     height: radius * 0.18)),
-                             with: .color(Color(red: 0.76, green: 0.56, blue: 0.28).opacity(0.44)))
-                var ridge = Path()
-                ridge.move(to: earthPoint(-0.40, -0.48))
-                ridge.addCurve(to: earthPoint(-0.03, -0.40),
-                               control1: earthPoint(-0.27, -0.57),
-                               control2: earthPoint(-0.15, -0.35))
-                terrain.stroke(ridge,
-                               with: .color(Color(red: 0.79, green: 0.76, blue: 0.62).opacity(0.38)),
-                               lineWidth: radius * 0.025)
-            }
-
-            // Ice cap follows the sunlit northern limb instead of appearing as
-            // a generic white band pasted over the globe.
-            var polarCap = Path()
-            polarCap.move(to: earthPoint(-0.86, -0.72))
-            polarCap.addCurve(to: earthPoint(0.62, -0.76),
-                              control1: earthPoint(-0.44, -0.96),
-                              control2: earthPoint(0.26, -0.88))
-            polarCap.addCurve(to: earthPoint(-0.86, -0.72),
-                              control1: earthPoint(0.18, -0.69),
-                              control2: earthPoint(-0.42, -0.66))
-            polarCap.closeSubpath()
-            surface.fill(polarCap,
-                         with: .linearGradient(Gradient(colors: [
-                            .white.opacity(0.68),
-                            Color(red: 0.62, green: 0.87, blue: 1.00).opacity(0.18)
-                         ]), startPoint: earthPoint(-0.40, -0.94),
-                         endPoint: earthPoint(-0.18, -0.64)))
-
-            surface.drawLayer { terrain in
-                terrain.clip(to: south)
-                var ridge = Path()
-                ridge.move(to: earthPoint(-0.71, -0.05))
-                ridge.addCurve(to: earthPoint(-0.61, 0.61),
-                               control1: earthPoint(-0.64, 0.15),
-                               control2: earthPoint(-0.67, 0.43))
-                terrain.stroke(ridge,
-                               with: .color(Color(red: 0.68, green: 0.62, blue: 0.44).opacity(0.42)),
-                               lineWidth: radius * 0.022)
-            }
-
-            // A single directional terminator makes the sphere dimensional.
-            // It is laid over the terrain but under clouds and city lights.
-            surface.fill(planet,
-                         with: .radialGradient(Gradient(stops: [
-                            .init(color: .clear, location: 0.38),
-                            .init(color: .black.opacity(0.18), location: 0.67),
-                            .init(color: .black.opacity(0.72), location: 1)
-                         ]),
-                         center: CGPoint(x: centre.x - radius * 0.35, y: centre.y - radius * 0.45),
-                         startRadius: 0,
-                         endRadius: radius * 1.6))
-
-            // Cloud bands follow curved weather systems rather than sitting on
-            // the globe as identical horizontal capsules.
-            surface.drawLayer { clouds in
-                clouds.blendMode = .plusLighter
-                clouds.addFilter(.blur(radius: max(0.8, radius * 0.009)))
-                for index in 0..<12 {
-                    let t = CGFloat(index) / 11
-                    let bandY = -0.70 + t * 1.22
-                    let startX = -0.86 + random(index, 31) * 0.20
-                    let endX = 0.72 - random(index, 32) * 0.18
-                    var band = Path()
-                    band.move(to: earthPoint(startX, bandY))
-                    band.addCurve(to: earthPoint(endX, bandY + (random(index, 33) - 0.5) * 0.16),
-                                  control1: earthPoint(-0.38, bandY - 0.13 + random(index, 34) * 0.10),
-                                  control2: earthPoint(0.18, bandY + 0.12 - random(index, 35) * 0.10))
-                    clouds.stroke(band,
-                                  with: .color(.white.opacity(0.12 + Double(random(index, 36)) * 0.13)),
-                                  style: StrokeStyle(lineWidth: radius * (0.016 + random(index, 37) * 0.024),
-                                                     lineCap: .round))
-                }
-
-                // Broken cloud cells keep the weather layer from reading as
-                // translucent stripes. Their soft ellipses bunch into fronts
-                // and leave enough gaps to see coast and terrain underneath.
-                for index in 0..<38 {
-                    let x = -0.90 + random(index, 131) * 1.78
-                    let y = -0.82 + random(index, 132) * 1.45
-                    let width = radius * (0.055 + random(index, 133) * 0.15)
-                    let height = width * (0.20 + random(index, 134) * 0.18)
-                    let point = earthPoint(x, y)
-                    clouds.fill(Path(ellipseIn: CGRect(x: point.x - width * 0.5,
-                                                       y: point.y - height * 0.5,
-                                                       width: width,
-                                                       height: height)),
-                                with: .radialGradient(Gradient(colors: [
-                                    .white.opacity(0.19 + Double(random(index, 135)) * 0.13),
-                                    .white.opacity(0.03)
-                                ]), center: point, startRadius: 0,
-                                endRadius: width * 0.52))
-                }
-
-                // One recognisable cyclonic weather system adds a natural
-                // focal detail and helps the globe read as Earth at a glance.
-                let stormCentre = earthPoint(0.44, -0.12)
-                for ring in 0..<4 {
-                    let stormRadius = radius * (0.045 + CGFloat(ring) * 0.032)
-                    var spiral = Path()
-                    spiral.addArc(center: stormCentre,
-                                  radius: stormRadius,
-                                  startAngle: .degrees(Double(35 + ring * 22)),
-                                  endAngle: .degrees(Double(295 + ring * 34)),
-                                  clockwise: false)
-                    clouds.stroke(spiral,
-                                  with: .color(.white.opacity(0.20 - Double(ring) * 0.025)),
-                                  style: StrokeStyle(lineWidth: max(0.8, radius * 0.013),
-                                                     lineCap: .round))
-                }
-            }
-
-            let cityHubs = [CGPoint(x: -0.43, y: -0.47),
-                            CGPoint(x: -0.17, y: -0.57),
-                            CGPoint(x: 0.02, y: -0.45),
-                            CGPoint(x: -0.20, y: -0.17),
-                            CGPoint(x: -0.54, y: 0.04)]
-            var cityGlow = surface
-            cityGlow.blendMode = .plusLighter
-            for index in 0..<74 {
-                let hub = cityHubs[index % cityHubs.count]
-                let x = centre.x + (hub.x + (random(index, 41) - 0.5) * 0.22) * radius
-                let y = centre.y + (hub.y + (random(index, 42) - 0.5) * 0.14) * radius
-                let dot = 0.55 + random(index, 43) * (isPad ? 1.45 : 1.05)
-                let color = index.isMultiple(of: 6)
-                    ? Color(red: 1.00, green: 0.94, blue: 0.76)
-                    : Color(red: 1.00, green: 0.66, blue: 0.28)
-                cityGlow.fill(Path(ellipseIn: CGRect(x: x - dot / 2, y: y - dot / 2,
-                                                     width: dot, height: dot)),
-                              with: .color(color.opacity(0.30 + Double(random(index, 45)) * 0.46)))
-            }
-        }
-
-        glow.stroke(Path(ellipseIn: disc), with: .color(cyan.opacity(0.36)), lineWidth: isPad ? 13 : 9)
-        glow.stroke(Path(ellipseIn: disc.insetBy(dx: 1, dy: 1)),
-                    with: .color(Color(red: 0.63, green: 0.93, blue: 1.00).opacity(0.82)),
-                    lineWidth: isPad ? 3 : 2)
-    }
-
-    /// Four deliberately different worlds after Earth: a cratered rust moon,
-    /// a banded ring giant, a cracked ice world and a volcanic final planet.
-    private func drawStylisedPlanet(in context: GraphicsContext, window: CGRect) {
-        let geometry = planetGeometry(in: window)
-        let centre = geometry.centre
-        let radius = geometry.radius
-        let disc = CGRect(x: centre.x - radius, y: centre.y - radius,
-                          width: radius * 2, height: radius * 2)
-        let planet = Path(ellipseIn: disc)
-
-        let light: Color
-        let middle: Color
-        let dark: Color
-        let aura: Color
-        switch destination {
-        case 2:
-            light = Color(red: 1.00, green: 0.50, blue: 0.24)
-            middle = Color(red: 0.66, green: 0.16, blue: 0.08)
-            dark = Color(red: 0.18, green: 0.025, blue: 0.025)
-            aura = Color(red: 1.00, green: 0.25, blue: 0.10)
-        case 3:
-            light = Color(red: 1.00, green: 0.88, blue: 0.52)
-            middle = Color(red: 0.78, green: 0.45, blue: 0.25)
-            dark = Color(red: 0.24, green: 0.10, blue: 0.18)
-            aura = Color(red: 1.00, green: 0.68, blue: 0.30)
-        case 4:
-            light = Color(red: 0.76, green: 1.00, blue: 0.98)
-            middle = Color(red: 0.12, green: 0.68, blue: 0.78)
-            dark = Color(red: 0.015, green: 0.12, blue: 0.28)
-            aura = Color(red: 0.30, green: 1.00, blue: 0.92)
-        default:
-            light = Color(red: 0.98, green: 0.36, blue: 0.62)
-            middle = Color(red: 0.45, green: 0.045, blue: 0.18)
-            dark = Color(red: 0.10, green: 0.008, blue: 0.055)
-            aura = Color(red: 1.00, green: 0.20, blue: 0.58)
-        }
-
-        if destination == 3 {
-            var rings = context
-            rings.blendMode = .plusLighter
-            for index in 0..<5 {
-                let inset = CGFloat(index) * radius * 0.11
-                let ring = CGRect(x: centre.x - radius * 1.72 + inset,
-                                  y: centre.y - radius * 0.42 + inset * 0.16,
-                                  width: radius * 3.44 - inset * 2,
-                                  height: radius * 0.84 - inset * 0.32)
-                rings.stroke(Path(ellipseIn: ring),
-                             with: .color((index.isMultiple(of: 2) ? light : aura)
-                                .opacity(0.34 + Double(index) * 0.055)),
-                             lineWidth: max(1.5, radius * 0.032))
-            }
-        }
-
-        var glow = context
-        glow.blendMode = .plusLighter
-        glow.fill(Path(ellipseIn: disc.insetBy(dx: -radius * 0.22,
-                                               dy: -radius * 0.22)),
-                  with: .radialGradient(Gradient(stops: [
-                    .init(color: .clear, location: 0.64),
-                    .init(color: aura.opacity(0.50), location: 0.82),
-                    .init(color: .clear, location: 1)
-                  ]), center: centre, startRadius: 0, endRadius: radius * 1.22))
-
-        context.fill(planet,
-                     with: .radialGradient(Gradient(colors: [light, middle, dark]),
-                                           center: CGPoint(x: centre.x - radius * 0.42,
-                                                           y: centre.y - radius * 0.50),
-                                           startRadius: 0,
-                                           endRadius: radius * 1.65))
-
-        context.drawLayer { surface in
-            surface.clip(to: planet)
-            switch destination {
-            case 2:
-                for index in 0..<24 {
-                    let angle = random(index, 201) * .pi * 2
-                    let distance = sqrt(random(index, 202)) * radius * 0.82
-                    let point = CGPoint(x: centre.x + cos(angle) * distance,
-                                        y: centre.y + sin(angle) * distance)
-                    let size = radius * (0.025 + random(index, 203) * 0.105)
-                    let crater = CGRect(x: point.x - size,
-                                        y: point.y - size * 0.58,
-                                        width: size * 2,
-                                        height: size * 1.16)
-                    surface.fill(Path(ellipseIn: crater),
-                                 with: .radialGradient(Gradient(colors: [dark.opacity(0.72),
-                                                                         middle.opacity(0.12)]),
-                                                       center: CGPoint(x: point.x + size * 0.20,
-                                                                       y: point.y + size * 0.12),
-                                                       startRadius: 0,
-                                                       endRadius: size))
-                    surface.stroke(Path(ellipseIn: crater.offsetBy(dx: -size * 0.08,
-                                                                   dy: -size * 0.10)),
-                                   with: .color(light.opacity(0.24)),
-                                   lineWidth: max(0.7, radius * 0.008))
-                }
-            case 3:
-                for index in 0..<15 {
-                    let y = disc.minY + disc.height * (CGFloat(index) + 0.5) / 15
-                    let thickness = radius * (0.035 + random(index, 211) * 0.055)
-                    let tint = index.isMultiple(of: 3) ? dark : light
-                    surface.fill(Path(CGRect(x: disc.minX, y: y,
-                                             width: disc.width, height: thickness)),
-                                 with: .color(tint.opacity(index.isMultiple(of: 3) ? 0.20 : 0.13)))
-                }
-                let storm = CGRect(x: centre.x - radius * 0.58,
-                                   y: centre.y + radius * 0.08,
-                                   width: radius * 0.54,
-                                   height: radius * 0.22)
-                surface.fill(Path(ellipseIn: storm),
-                             with: .radialGradient(Gradient(colors: [light.opacity(0.62),
-                                                                     aura.opacity(0.08)]),
-                                                   center: CGPoint(x: storm.midX, y: storm.midY),
-                                                   startRadius: 0,
-                                                   endRadius: storm.width * 0.5))
-            case 4:
-                for index in 0..<18 {
-                    let angle = Double(index) / 18 * .pi * 2 + Double(random(index, 221))
-                    let start = CGPoint(x: centre.x + cos(angle) * radius * 0.12,
-                                        y: centre.y + sin(angle) * radius * 0.12)
-                    let end = CGPoint(x: centre.x + cos(angle + 0.22) * radius * 0.94,
-                                      y: centre.y + sin(angle + 0.22) * radius * 0.94)
-                    var crack = Path()
-                    crack.move(to: start)
-                    crack.addLine(to: CGPoint(x: (start.x + end.x) * 0.53 + radius * 0.06,
-                                              y: (start.y + end.y) * 0.47))
-                    crack.addLine(to: end)
-                    surface.stroke(crack,
-                                   with: .color(.white.opacity(index.isMultiple(of: 3) ? 0.62 : 0.30)),
-                                   lineWidth: max(0.7, radius * 0.009))
-                }
-            default:
-                var lavaGlow = surface
-                lavaGlow.blendMode = .plusLighter
-                for index in 0..<16 {
-                    let angle = Double(index) / 16 * .pi * 2 + Double(random(index, 231)) * 0.4
-                    var fissure = Path()
-                    fissure.move(to: CGPoint(x: centre.x + cos(angle) * radius * 0.08,
-                                             y: centre.y + sin(angle) * radius * 0.08))
-                    fissure.addLine(to: CGPoint(x: centre.x + cos(angle + 0.18) * radius * 0.50,
-                                                y: centre.y + sin(angle + 0.18) * radius * 0.50))
-                    fissure.addLine(to: CGPoint(x: centre.x + cos(angle - 0.08) * radius * 0.95,
-                                                y: centre.y + sin(angle - 0.08) * radius * 0.95))
-                    surface.stroke(fissure,
-                                   with: .color(Color(red: 1.00, green: 0.52, blue: 0.12)
-                                    .opacity(0.70)),
-                                   lineWidth: max(1.2, radius * 0.018))
-                    lavaGlow.stroke(fissure,
-                                    with: .color(aura.opacity(0.40)),
-                                    lineWidth: max(4, radius * 0.055))
-                }
-            }
-
-            surface.fill(planet,
-                         with: .radialGradient(Gradient(stops: [
-                            .init(color: .clear, location: 0.40),
-                            .init(color: .black.opacity(0.16), location: 0.68),
-                            .init(color: .black.opacity(0.76), location: 1)
-                         ]),
-                         center: CGPoint(x: centre.x - radius * 0.42,
-                                         y: centre.y - radius * 0.46),
-                         startRadius: 0,
-                         endRadius: radius * 1.58))
-        }
-
-        glow.stroke(planet, with: .color(aura.opacity(0.42)),
-                    lineWidth: isPad ? 10 : 7)
-        context.stroke(planet, with: .color(light.opacity(0.70)),
-                       lineWidth: isPad ? 2.5 : 1.7)
     }
 
     private func drawWindowFrame(in context: GraphicsContext, window: CGRect, cut: CGFloat) {
@@ -4145,23 +3102,6 @@ private struct SpaceshipCockpit: View {
             glow.fill(Path(ellipseIn: CGRect(x: x, y: y, width: radius, height: radius)),
                       with: .color(tint.opacity(0.25 + Double(depth) * 0.45)))
         }
-    }
-
-    private func drawGalaxyShimmer(in context: GraphicsContext, window: CGRect, time: TimeInterval) {
-        guard destination == 1 else { return }
-        var glow = context
-        glow.blendMode = .plusLighter
-        let origin = CGPoint(x: window.minX + window.width * 0.215,
-                             y: window.minY + window.height * 0.285)
-        let breathe = 0.055 + 0.028 * sin(time * 0.7)
-        let radius = window.height * 0.17
-        glow.fill(Path(ellipseIn: CGRect(x: origin.x - radius, y: origin.y - radius * 0.65,
-                                         width: radius * 2, height: radius * 1.3)),
-                  with: .radialGradient(Gradient(colors: [Color(red: 0.85, green: 0.55, blue: 1).opacity(breathe),
-                                                          .clear]),
-                                        center: origin,
-                                        startRadius: 0,
-                                        endRadius: radius))
     }
 
     private func drawCabinetPulse(in context: GraphicsContext, window: CGRect, time: TimeInterval) {

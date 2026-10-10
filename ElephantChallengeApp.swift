@@ -92,7 +92,7 @@ struct ElephantChallengeApp: App {
         // The deterministic App Store trailer exporter is development tooling.
         // It deliberately bypasses persistence, StoreKit, notifications and
         // onboarding so an export cannot mutate a real player's state.
-        if TrailerRuntime.isExporting { return }
+        if TrailerRuntime.isExporting || planetDesignPreviewStage != nil { return }
 
         // Bring stored progress up to the current version before anything can
         // read it: data written by Jumping Fox must never reach the new game.
@@ -116,10 +116,36 @@ struct ElephantChallengeApp: App {
         NotificationManager.shared.start()
     }
 
+    private var planetDesignPreviewCharacter: String {
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "--planet-character"),
+           arguments.indices.contains(index + 1),
+           CharacterCatalog.all.contains(where: { $0.id == arguments[index + 1] }) {
+            return arguments[index + 1]
+        }
+#endif
+        return "lion"
+    }
+
+    private var planetDesignPreviewStage: Int? {
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--planet-design-preview"),
+              arguments.indices.contains(index + 1),
+              let stage = Int(arguments[index + 1]), (1...5).contains(stage) else { return nil }
+        return stage
+#else
+        return nil
+#endif
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
-                if TrailerRuntime.isExporting {
+                if let stage = planetDesignPreviewStage {
+                    PlanetDesignPreview(stage: stage, characterID: planetDesignPreviewCharacter)
+                } else if TrailerRuntime.isExporting {
                     TrailerExportHost()
                 } else {
                     ZStack {
@@ -213,4 +239,24 @@ enum AppLayout {
     /// stretching controls into long, hard-to-scan rows.
     static var landscapeContentWidth: CGFloat { isPad ? 1180 : 980 }
     static var landscapeGutter: CGFloat { isPad ? 28 : 16 }
+}
+
+/// Development preview uses the production playfield for visual comparison.
+private struct PlanetDesignPreview: View {
+    let stage: Int
+    let characterID: String
+    var body: some View {
+        GeometryReader { geometry in
+            SpaceLionPlayfield(rounds: [], character: CharacterCatalog.character(id: characterID),
+                               isPad: geometry.size.height > 600, isLive: false,
+                               isRunning: false, playsFishEntrance: false,
+                               playsLevelCompletion: false, destinationStage: stage,
+                               isTravelling: false, journeyID: 0, reduceMotion: true,
+                               topReserve: 0, bottomReserve: 0, leftReserve: 0, rightReserve: 0,
+                               onHit: { _, _, _ in false }, onSwallow: { _ in }, onDive: {},
+                               onFishEntranceComplete: {}, onLevelCompletionFinished: {})
+        }
+        .ignoresSafeArea()
+        .statusBarHidden()
+    }
 }
