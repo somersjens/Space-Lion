@@ -115,6 +115,10 @@ struct PremiumView: View {
     /// full window while the sheet card is narrower, which is what clipped the
     /// outer animals. Zero until the sheet has reported its real clip.
     @State private var clippedWidth: CGFloat = 0
+    /// The text column beside a benefit icon, measured from the laid-out row.
+    /// The estimate used before this arrives is a little wide, which is why the
+    /// longest subtitle was still drawing an ellipsis.
+    @State private var measuredSubtitleColumn: CGFloat = 0
 
     init(initialCharacterID: String? = nil,
          celebratedUnlockCharacterID: String? = nil) {
@@ -156,13 +160,21 @@ struct PremiumView: View {
                                 heroPanel(metrics)
                                     .frame(width: heroWidth(available: available,
                                                             metrics: metrics))
-                                offerPanel(metrics)
+                                offerPanel(metrics, subtitleSize: subtitleSize(
+                                    metrics: metrics,
+                                    offerWidth: offerWidth(available: available,
+                                                           metrics: metrics,
+                                                           isSplit: true)))
                                     .frame(maxWidth: .infinity)
                                     .frame(maxHeight: .infinity)
                             }
                         } else {
                             heroPanel(metrics)
-                            offerPanel(metrics)
+                            offerPanel(metrics, subtitleSize: subtitleSize(
+                                metrics: metrics,
+                                offerWidth: offerWidth(available: available,
+                                                       metrics: metrics,
+                                                       isSplit: false)))
                         }
 
                         characterStrip(metrics, columns: castColumns)
@@ -320,30 +332,41 @@ struct PremiumView: View {
     /// Right half: what Premium gives you, and the button that buys it, all in
     /// one bordered card so the perks, the button and the fine print underneath
     /// read as a single offer rather than stacked, separate blocks.
-    private func offerPanel(_ metrics: PremiumMetrics) -> some View {
-        // One consistent gap between every item in the card — the three rows,
-        // and the step down into the button — so the whole block reads as an
-        // evenly paced list rather than a mix of tight and loose gaps.
-        let itemGap = metrics.featureSpacing * 0.75
+    private func offerPanel(_ metrics: PremiumMetrics, subtitleSize: CGFloat) -> some View {
+        let itemGap = metrics.featureSpacing * 0.7
+        let titleSize = min(metrics.featureTitle, metrics.buttonFont)
         return VStack(alignment: .center, spacing: 0) {
-            Spacer(minLength: itemGap)
-            featureRow(icon: "square.grid.3x3.fill",
-                       title: L("premium.feature.levels.title"),
-                       subtitle: L("premium.feature.levels.subtitle"),
-                       metrics: metrics)
-            Spacer(minLength: itemGap)
-            featureRow(icon: "pawprint.fill",
-                       title: L("premium.feature.animals.title"),
-                       subtitle: L("premium.feature.animals.subtitle"),
-                       metrics: metrics)
-            Spacer(minLength: itemGap)
-            featureRow(icon: "checkmark.seal.fill",
-                       title: L("premium.feature.noAds.title"),
-                       subtitle: L("premium.feature.noAds.subtitle"),
-                       metrics: metrics)
+            Spacer(minLength: itemGap * 0.35)
+            offerHeader(metrics)
+            Spacer(minLength: itemGap * 0.8)
+            VStack(spacing: itemGap * 0.85) {
+                featureRow(icon: "square.grid.3x3.fill",
+                           title: L("premium.feature.levels.title"),
+                           subtitle: L("premium.feature.levels.subtitle"),
+                           titleSize: titleSize,
+                           subtitleSize: subtitleSize,
+                           metrics: metrics)
+                featureRow(icon: "pawprint.fill",
+                           title: L("premium.feature.animals.title"),
+                           subtitle: L("premium.feature.animals.subtitle"),
+                           titleSize: titleSize,
+                           subtitleSize: subtitleSize,
+                           metrics: metrics)
+                featureRow(icon: "checkmark.seal.fill",
+                           title: L("premium.feature.noAds.title"),
+                           subtitle: L("premium.feature.noAds.subtitle"),
+                           titleSize: titleSize,
+                           subtitleSize: subtitleSize,
+                           metrics: metrics)
+            }
             Spacer(minLength: itemGap)
 
             purchaseSection(metrics)
+        }
+        .onPreferenceChange(SubtitleColumnWidthKey.self) { width in
+            guard width.isFinite, width > 1,
+                  abs(width - measuredSubtitleColumn) > 0.5 else { return }
+            measuredSubtitleColumn = width
         }
         .padding(metrics.panelPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -630,9 +653,94 @@ struct PremiumView: View {
         }
     }
 
+    /// Crown and title above the three benefits. iPad stacks them; the shorter
+    /// iPhone landscape row keeps the crown beside the title so the buy button
+    /// still fits on one screen.
+    private func offerHeader(_ metrics: PremiumMetrics) -> some View {
+        let crown = Image(systemName: "crown.fill")
+            .font(.system(size: metrics.headerSize * (isPad ? 1.45 : 1.15), weight: .bold))
+            .foregroundStyle(
+                LinearGradient(colors: [character.color, character.deepColor],
+                               startPoint: .top, endPoint: .bottom)
+            )
+            .shadow(color: character.color.opacity(0.35), radius: 6, y: 2)
+        let title = Text(premium.isPremium
+                         ? L("premium.unlockedWithPremium")
+                         : L("premium.upgradeTitle"))
+            .font(.system(size: metrics.headerSize * (isPad ? 1.25 : 1.05),
+                          weight: .heavy, design: .rounded))
+            .foregroundStyle(character.deepColor)
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .minimumScaleFactor(0.65)
+        return Group {
+            if isPad {
+                VStack(spacing: metrics.featureSpacing * 0.28) {
+                    crown
+                    title
+                }
+            } else {
+                HStack(spacing: metrics.panelSpacing) {
+                    crown
+                    title
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Width of the offer column, using the same split as the layout above it.
+    private func offerWidth(available: CGFloat,
+                            metrics: PremiumMetrics,
+                            isSplit: Bool) -> CGFloat {
+        let content = available - metrics.cardPadding * 2
+        guard isSplit else { return max(1, content) }
+        return max(1, content
+                   - heroWidth(available: available, metrics: metrics)
+                   - metrics.columnSpacing)
+    }
+
+    /// One size for every benefit subtitle. The longest line sets it, and it
+    /// never wraps, so the three descriptions stay visually even.
+    ///
+    /// The column is measured from the row itself. Guessing it from the offer
+    /// width left a few points too many, so the longest line — the animals
+    /// subtitle — still hit the edge and truncated.
+    private func subtitleSize(metrics: PremiumMetrics, offerWidth: CGFloat) -> CGFloat {
+        let cap = min(metrics.featureSubtitle, metrics.buttonFont)
+        let icon = metrics.featureTitle * 2.25
+        let estimated = max(48, offerWidth
+                            - metrics.panelPadding * 2
+                            - metrics.panelPadding * 1.4
+                            - icon
+                            - metrics.panelSpacing)
+        // Until the row has been measured, stay a step under the guess so the
+        // first frame does not flash an ellipsis.
+        let column = measuredSubtitleColumn > 1 ? measuredSubtitleColumn : estimated * 0.86
+        let lines = [
+            L("premium.feature.levels.subtitle"),
+            L("premium.feature.animals.subtitle"),
+            L("premium.feature.noAds.subtitle")
+        ]
+#if canImport(UIKit)
+        let font = UIFont.systemFont(ofSize: cap, weight: .regular)
+        let widest = lines
+            .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+            .max() ?? 0
+        guard widest > 1 else { return cap }
+        // SwiftUI truncates a line that merely touches its frame, so the fit
+        // keeps a few points of slack.
+        return cap * min(1, (column - 8) / widest)
+#else
+        return cap
+#endif
+    }
+
     private func featureRow(icon: String, title: String, subtitle: String,
+                            titleSize: CGFloat, subtitleSize: CGFloat,
                             metrics: PremiumMetrics) -> some View {
-        HStack(spacing: metrics.panelSpacing) {
+        let corner = metrics.headerSize * 0.7
+        return HStack(spacing: metrics.panelSpacing) {
             Image(systemName: icon)
                 .font(.system(size: metrics.featureTitle * 0.88, weight: .bold))
                 .foregroundStyle(.white)
@@ -653,18 +761,34 @@ struct PremiumView: View {
 
             VStack(alignment: .leading, spacing: metrics.footnote * 0.18) {
                 Text(title)
-                    .font(.system(size: metrics.featureTitle, weight: .bold))
+                    .font(.system(size: titleSize, weight: .bold))
                     .foregroundStyle(character.deepColor)
+                    .lineLimit(2)
                 Text(subtitle)
-                    .font(.system(size: metrics.featureSubtitle))
+                    .font(.system(size: subtitleSize))
                     .foregroundStyle(character.deepColor.opacity(0.7))
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: SubtitleColumnWidthKey.self,
+                                           value: proxy.size.width)
+                }
             }
 
             Spacer(minLength: 0)
         }
         .multilineTextAlignment(.leading)
+        .padding(.horizontal, metrics.panelPadding * 0.7)
+        .padding(.vertical, metrics.panelPadding * 0.55)
         .frame(maxWidth: .infinity)
+        .background(Color.white.opacity(0.62),
+                    in: RoundedRectangle(cornerRadius: corner, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .strokeBorder(character.color.opacity(0.55), lineWidth: 1.25)
+        )
     }
 
     private func unlockCelebration(animal: AnimalCharacter) -> some View {
@@ -876,6 +1000,14 @@ private extension View {
             // fly total like "5000" (more content) render as the exact same pill.
             .frame(width: size * 3.6, height: size * 1.4)
             .background(character.color.opacity(isUnlocked ? 0.22 : 0.10), in: Capsule())
+    }
+}
+
+/// The width of the text beside a benefit icon, shared by all three rows.
+private struct SubtitleColumnWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
