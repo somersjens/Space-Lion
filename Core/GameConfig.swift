@@ -70,8 +70,9 @@ public enum GameConfig {
     /// maximum number of correct answers is reached. Preparing twelve times the
     /// board maximum therefore built hundreds of rounds that could never be
     /// played, synchronously on the main actor while the game was opening.
-    /// `RoundFactory` completes the final six-answer block itself, so returning
-    /// the exact board maximum still preserves the fixed, balanced sequence.
+    /// `RoundFactory` completes the final ten-question stage itself, so
+    /// returning the exact board maximum still preserves the rolling answer
+    /// bank without preparing unreachable stages.
     public static func preparedSequenceLength(boardMaximum: Int) -> Int {
         max(1, boardMaximum)
     }

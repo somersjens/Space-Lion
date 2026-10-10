@@ -136,6 +136,7 @@ struct GameView: View {
                     .transition(.opacity)
                     .zIndex(2)
             }
+
         }
         // What the level fills with is what the HUD counts and what the
         // celebrations rain down, all the way through the start card, the
@@ -227,7 +228,7 @@ struct GameView: View {
         let topInset = max(screenInsets.top, isPad ? 24 : 16)
 
         return GeometryReader { proxy in
-            let topReserve = topInset + (isPad ? 112 : 78)
+            let topReserve = cockpitTopReserve(below: topInset)
             let cockpitMetrics = SpaceLionPlayfield.Metrics(
                 size: proxy.size,
                 topReserve: topReserve,
@@ -236,7 +237,6 @@ struct GameView: View {
                 rightReserve: screenInsets.right,
                 isPad: isPad
             )
-            let hudInsets = cockpitMetrics.hudInsets(pauseWidth: hudControlSize)
             ZStack(alignment: .top) {
                 SpaceLionPlayfield(rounds: model.visibleRounds,
                               character: character,
@@ -280,16 +280,10 @@ struct GameView: View {
                     // they were. It reads the same either way, so it is pinned.
                     .environment(\.layoutDirection, .leftToRight)
 
-                hud
-                    // In landscape the Dynamic Island lives in a horizontal
-                    // safe area. The actual paddings come from the same cockpit
-                    // geometry as the answer banks: pause is centred over the
-                    // left column and the score edge ends over the right one.
-                    .padding(.leading, hudInsets.leading)
-                    .padding(.trailing, hudInsets.trailing)
-                    .padding(.top, hudTop(below: topInset))
-                    .opacity(showsGameplayHUD ? 1 : 0)
-                    .allowsHitTesting(showsGameplayHUD)
+                if showsInstrumentHUD {
+                    placedHUD(in: proxy.size)
+                        .allowsHitTesting(!showsIntro && !showsResult)
+                }
 
                 if model.comboAnnouncementID > 0 {
                     ComboHoopBanner(token: model.comboAnnouncementID,
@@ -341,26 +335,49 @@ struct GameView: View {
 
     // MARK: - HUD
 
-    /// One continuous cockpit rail: pause, the active sum, remaining mission
-    /// time and distance against the board target. It fills the usable width
-    /// without entering either landscape sensor safe area.
-    private var hud: some View {
-        HStack(spacing: isPad ? 12 : 7) {
-            pauseButton
+    private func placedHUD(in size: CGSize) -> some View {
+        let topInset = max(screenInsets.top, isPad ? 24 : 16)
+        let topReserve = cockpitTopReserve(below: topInset)
+        let cockpitMetrics = SpaceLionPlayfield.Metrics(
+            size: size,
+            topReserve: topReserve,
+            bottomReserve: screenInsets.bottom,
+            leftReserve: screenInsets.left,
+            rightReserve: screenInsets.right,
+            isPad: isPad
+        )
+        let hudInsets = cockpitMetrics.hudInsets(pauseWidth: sideHudWidth)
+        return hud
+            .padding(.leading, hudInsets.leading)
+            .padding(.trailing, hudInsets.trailing)
+            .padding(.top, hudTop(below: topInset, ceiling: cockpitMetrics.ceilingBand))
+    }
 
-            cockpitPanel(holographic: true) {
+    /// One rail with the same gap between every instrument. The sum fills the
+    /// middle. Timer and score stay as wide as their own copy, so a longer
+    /// word such as "vraag" widens only that housing.
+    private var hud: some View {
+        HStack(alignment: .center, spacing: isPad ? 12 : 7) {
+            pauseButton
+            cockpitPanel(holographic: true, expands: true, height: hudHeight) {
                 questionReadout
             }
-            .frame(maxWidth: .infinity)
-
             timerCounter
             scoreCounter
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func hudTop(below topInset: CGFloat) -> CGFloat {
-        topInset + (isPad ? 10 : 5)
+    private func cockpitTopReserve(below topInset: CGFloat) -> CGFloat {
+        topInset + (isPad ? 118 : 78)
+    }
+
+    private func hudTop(below topInset: CGFloat, ceiling: CGFloat) -> CGFloat {
+        if isPad {
+            // Sit on the midline of the roof, clear of the status bar.
+            return max(topInset + 2, (ceiling - hudHeight) / 2)
+        }
+        return topInset + 5
     }
 
     /// Pausing freezes the reef in place and puts the level card over it. The
@@ -372,14 +389,14 @@ struct GameView: View {
             showsPauseCard = true
             showsIntro = true
         } label: {
-            cockpitPanel {
+            cockpitPanel(height: hudHeight) {
                 Image(systemName: "pause.fill")
                     .font(.system(size: pauseGlyphSize, weight: .black))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityLabel(Text("Pause"))
             }
-            .frame(width: hudControlSize)
+            .frame(width: sideHudWidth)
             .contentShape(RoundedRectangle(cornerRadius: isPad ? 18 : 13,
                                            style: .continuous))
         }
@@ -388,9 +405,11 @@ struct GameView: View {
         .accessibilityIdentifier("pause")
     }
 
-    private var hudControlSize: CGFloat { isPad ? 72 : 54 }
-    private var pauseGlyphSize: CGFloat { isPad ? 28 : 20 }
-    private var hudNumberSize: CGFloat { isPad ? 28 : 20 }
+    /// Every instrument shares this height. The pause control is square.
+    private var hudHeight: CGFloat { isPad ? 94 : 54 }
+    private var sideHudWidth: CGFloat { isPad ? hudHeight : 54 }
+    private var pauseGlyphSize: CGFloat { isPad ? 32 : 20 }
+    private var hudNumberSize: CGFloat { isPad ? 34 : 20 }
 
     /// 0 while plenty of time remains, 1 when the clock is about to run out.
     /// The lamp shifts through that range instead of flipping colour at a cliff.
@@ -413,8 +432,8 @@ struct GameView: View {
         let total = max(1, model.currentStageDuration)
         let progress = CGFloat(min(1, max(0, Double(model.timeRemaining) / Double(total))))
         let lamp = timerLamp
-        return cockpitPanel {
-            HStack(spacing: isPad ? 9 : 6) {
+        return cockpitPanel(height: hudHeight) {
+            HStack(alignment: .center, spacing: isPad ? 12 : 6) {
                 // This is a decorative sweep around a once-per-second value;
                 // it does not need a separate 30 fps display link.
                 TimelineView(.animation(minimumInterval: 1.0 / 8.0,
@@ -424,75 +443,78 @@ struct GameView: View {
                         Circle()
                             .stroke(.white.opacity(0.14), lineWidth: isPad ? 4 : 3)
                         Circle()
-                            .trim(from: 0, to: progress)
+                            .trim(from: 0, to: hudIsFilled ? progress : 0)
                             .stroke(lamp,
                                     style: StrokeStyle(lineWidth: isPad ? 4 : 3,
                                                        lineCap: .round))
                             .rotationEffect(.degrees(-90))
                             .shadow(color: lamp.opacity(0.85), radius: isPad ? 5 : 3)
                         Circle()
-                            .trim(from: 0, to: 0.18)
+                            .trim(from: 0, to: hudIsFilled ? 0.18 : 0)
                             .stroke(.white.opacity(0.95),
                                     style: StrokeStyle(lineWidth: isPad ? 2.4 : 1.8,
                                                        lineCap: .round))
                             .rotationEffect(.degrees(spin))
                             .shadow(color: lamp, radius: 3)
                         Image(systemName: "timer")
-                            .font(.system(size: isPad ? 22 : 16, weight: .bold))
+                            .font(.system(size: isPad ? 28 : 16, weight: .bold))
                             .foregroundStyle(lamp)
                     }
                 }
-                .frame(width: isPad ? 40 : 30, height: isPad ? 40 : 30)
+                .frame(width: isPad ? 48 : 30, height: isPad ? 48 : 30)
                 VStack(alignment: .center, spacing: isPad ? 1 : 0) {
-                    Text(String(format: "%d:%02d", minutes, seconds))
+                    Text(verbatim: String(format: "%d:%02d", minutes, seconds))
                         .font(.system(size: hudNumberSize, weight: .black, design: .rounded))
                         .monospacedDigit()
                         .contentTransition(.numericText())
                         .foregroundStyle(timerUrgency > 0.55 ? lamp : .white)
-                        .frame(maxWidth: .infinity)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
 
                     Text(verbatim: L(key: "game.hud.secondsPerQuestion",
                                     count: model.secondsPerQuestion))
-                    .font(.system(size: isPad ? 13 : 10,
+                    .font(.system(size: isPad ? 15 : 10,
                                   weight: .bold,
                                   design: .rounded))
                     .foregroundStyle(.white.opacity(0.72))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.62)
-                    .frame(maxWidth: .infinity)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
-                .frame(width: isPad ? 102 : 76)
+                .opacity(hudIsFilled ? 1 : 0)
+                .accessibilityHidden(!hudIsFilled)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, isPad ? 6 : 4)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, hudSideInset)
         }
-        .frame(width: isPad ? 218 : 158)
         .accessibilityIdentifier("level-timer")
     }
 
     private var scoreCounter: some View {
-        cockpitPanel {
-            HStack(spacing: isPad ? 9 : 6) {
+        cockpitPanel(height: hudHeight) {
+            HStack(alignment: .center, spacing: isPad ? 12 : 6) {
                 Text(verbatim: "\(model.stageNumber)/\(model.totalStages)")
                     .environment(\.layoutDirection, .leftToRight)
-                    .font(.system(size: isPad ? 29 : 21,
+                    .font(.system(size: isPad ? 34 : 21,
                                   weight: .black,
                                   design: .rounded))
                     .monospacedDigit()
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .contentTransition(.numericText(value: Double(model.stageNumber)))
                     .shadow(color: hudOrange.opacity(0.38), radius: isPad ? 5 : 3)
+                    .opacity(hudIsFilled ? 1 : 0)
 
                 Capsule()
                     .fill(hudCyan.opacity(0.36))
-                    .frame(width: isPad ? 2 : 1, height: isPad ? 38 : 28)
+                    .frame(width: isPad ? 2 : 1, height: isPad ? 40 : 28)
+                    .opacity(hudIsFilled ? 1 : 0)
                     .shadow(color: hudCyan, radius: 3)
 
                 answerPaceDots
             }
-            .frame(maxWidth: .infinity)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, hudSideInset)
         }
-        .frame(width: isPad ? 226 : 160)
         .animation(.spring(response: 0.3, dampingFraction: 0.72), value: model.completedQuestions)
         .accessibilityIdentifier("progress")
         .accessibilityLabel(Text(verbatim: "\(model.stageNumber) / \(model.totalStages)"))
@@ -501,9 +523,9 @@ struct GameView: View {
 
     private var answerPaceDots: some View {
         let paces = model.currentStageAnswerPaces
-        return VStack(spacing: isPad ? 5 : 3) {
+        return VStack(spacing: isPad ? 7 : 3) {
             ForEach(0..<2, id: \.self) { row in
-                HStack(spacing: isPad ? 5 : 3) {
+                HStack(spacing: isPad ? 7 : 3) {
                     ForEach(0..<5, id: \.self) { column in
                         let index = row * 5 + column
                         let pace = index < paces.count ? paces[index] : nil
@@ -518,7 +540,7 @@ struct GameView: View {
                             }
                             .shadow(color: answerDotGlow(for: pace),
                                     radius: pace == nil ? 1 : (isPad ? 5 : 3))
-                            .frame(width: isPad ? 16 : 12, height: isPad ? 16 : 12)
+                            .frame(width: isPad ? 24 : 12, height: isPad ? 24 : 12)
                             .scaleEffect(pace == nil ? 0.92 : 1)
                     }
                 }
@@ -555,16 +577,19 @@ struct GameView: View {
 
     private var questionReadout: some View {
         let displayedRound = model.round ?? model.visibleRounds.first
-        return questionLabel(displayedRound?.question.prompt ?? "—")
-            .id(displayedRound?.id)
+        let prompt = hudIsFilled ? (displayedRound?.question.prompt ?? "—") : " "
+        return questionLabel(prompt)
+            .id(hudIsFilled ? displayedRound?.id : nil)
             .transition(.opacity.combined(with: .scale(scale: 0.92)))
             .lineLimit(1)
             .minimumScaleFactor(0.42)
             .accessibilityIdentifier("space-lion-question")
-            .frame(maxWidth: .infinity)
-            .scaleEffect(revealsFirstQuestion ? 1 : 0.78)
-            .offset(y: revealsFirstQuestion ? 0 : -7)
-            .opacity(revealsFirstQuestion ? 1 : 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .blur(radius: showsPauseCard ? (isPad ? 8 : 5.5) : 0)
+            .scaleEffect(!hudIsFilled || revealsFirstQuestion ? 1 : 0.78)
+            .offset(y: !hudIsFilled || revealsFirstQuestion ? 0 : -7)
+            .opacity(!hudIsFilled || revealsFirstQuestion ? 1 : 0)
+            .animation(.easeInOut(duration: 0.25), value: showsPauseCard)
             .animation(.spring(response: 0.34, dampingFraction: 0.82), value: model.round?.id)
     }
 
@@ -572,7 +597,7 @@ struct GameView: View {
         let marker = prompt.range(of: "?")
         let leading = marker.map { String(prompt[..<$0.lowerBound]) } ?? prompt
         let trailing = marker.map { String(prompt[$0.upperBound...]) } ?? ""
-        return HStack(alignment: .firstTextBaseline, spacing: 0) {
+        return HStack(alignment: .center, spacing: 0) {
             Text(verbatim: leading)
                 .foregroundStyle(.white)
             if marker != nil {
@@ -585,15 +610,17 @@ struct GameView: View {
                     .foregroundStyle(.white)
             }
         }
-        .font(.system(size: isPad ? 38 : 27, weight: .black, design: .rounded))
+        .font(.system(size: isPad ? 44 : 27, weight: .black, design: .rounded))
         .shadow(color: .black.opacity(0.55), radius: 0, y: 1)
     }
 
     private func cockpitPanel<Content: View>(
         holographic: Bool = false,
+        expands: Bool = false,
+        height: CGFloat,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        let cut: CGFloat = isPad ? 14 : 10
+        let cut: CGFloat = isPad ? 16 : 10
         let fill = holographic
             ? [Color(red: 0.10, green: 0.16, blue: 0.42),
                Color(red: 0.04, green: 0.05, blue: 0.18),
@@ -603,8 +630,16 @@ struct GameView: View {
                Color(red: 0.012, green: 0.02, blue: 0.06)]
         return content()
             .foregroundStyle(.white)
-            .padding(.horizontal, isPad ? 17 : 10)
-            .frame(height: hudControlSize)
+            .frame(maxWidth: expands ? .infinity : nil,
+                   maxHeight: .infinity,
+                   alignment: .center)
+            // The pitch rotates around the top edge. At 4–5° the midpoint
+            // moves by a fraction of a point, so it does not belong in this
+            // offset. The outer stroke is symmetric; only the energy rail
+            // sits on the bottom, and half of that rail is how far the open
+            // face sits above the box centre.
+            .offset(y: glyphOpticalOffset)
+            .frame(height: height)
             .background {
                 ZStack {
                     CockpitHUDShape(cut: cut)
@@ -646,7 +681,7 @@ struct GameView: View {
                         color: holographic ? hudOrange : hudCyan,
                         isRunning: isReefRunning && !reduceMotion
                     )
-                        .frame(width: isPad ? 72 : 46, height: isPad ? 3 : 2)
+                        .frame(width: isPad ? 84 : 46, height: isPad ? 3 : 2)
                         .padding(.bottom, isPad ? 5 : 3)
                 }
                 .shadow(color: .black.opacity(0.45), radius: 8, y: 4)
@@ -663,16 +698,35 @@ struct GameView: View {
                     y: isPad ? 6 : 4)
     }
 
+    /// Horizontal room inside the timer and score housings. The chamfer
+    /// already consumes `cut` at each corner; the extra points keep the
+    /// clock and the dots off that metal.
+    private var hudSideInset: CGFloat {
+        let cut: CGFloat = isPad ? 16 : 10
+        return cut + (isPad ? 12 : 4)
+    }
+
+    /// See `cockpitPanel`. Rail height and its bottom padding are the same
+    /// numbers the housing paints.
+    private var glyphOpticalOffset: CGFloat {
+        let railHeight: CGFloat = isPad ? 3 : 2
+        let railBottomPadding: CGFloat = isPad ? 5 : 3
+        return -(railHeight + railBottomPadding) / 2
+    }
+
     private var hudCyan: Color { Color(red: 0.00, green: 0.75, blue: 1.00) }
     /// The secondary cockpit light follows the selected character. For the
     /// lion this is the same warm yellow used by its suit and portrait.
     private var hudOrange: Color { character.color }
 
-    private var showsGameplayHUD: Bool {
-        // The HUD belongs to the level reveal, not to the end of the character
-        // entrance. Keeping it visible during that entrance prevents the
-        // cockpit from appearing first and its instruments popping in later.
-        !showsIntro && !playsLevelCompletion
+    /// True once a round is on the instruments. The start card keeps the
+    /// housings, but leaves them empty. Pause fills them again and blurs the sum.
+    private var hudIsFilled: Bool { !showsIntro || showsPauseCard }
+
+    private var showsInstrumentHUD: Bool {
+        // The rail stays up for the start card and for pause. It steps aside
+        // only for the victory bloom and the result card.
+        !playsLevelCompletion && !showsResult
     }
 
     /// The reef only ticks while the level is actually being played: never

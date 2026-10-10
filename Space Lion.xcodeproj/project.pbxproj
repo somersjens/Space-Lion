@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		A1B2C3D53074D18500BC6413 /* sfx_button_press.caf in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D43074D18500BC6413 /* sfx_button_press.caf */; };
 		F940050C3074D18500BC6413 /* sfx_double_card.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94004F53074D18500BC6413 /* sfx_double_card.caf */; };
-		F940050D3074D18500BC6413 /* translations.py in Resources */ = {isa = PBXBuildFile; fileRef = F94005083074D18500BC6413 /* translations.py */; };
 		F940050E3074D18500BC6413 /* sfx_turbo.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F94005013074D18500BC6413 /* sfx_turbo.m4a */; };
 		F940050F3074D18500BC6413 /* sfx_cannon_shoot.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F94004F03074D18500BC6413 /* sfx_cannon_shoot.m4a */; };
 		F94005103074D18500BC6413 /* sfx_character_unlock.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94004F43074D18500BC6413 /* sfx_character_unlock.caf */; };
@@ -23,16 +22,12 @@
 		F94005183074D18500BC6413 /* background_music.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = F94004C03074D18500BC6413 /* background_music.mp3 */; };
 		F94005193074D18500BC6413 /* sfx_switch_off.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94004FF3074D18500BC6413 /* sfx_switch_off.caf */; };
 		F940051A3074D18500BC6413 /* sfx_level_complete.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94004FB3074D18500BC6413 /* sfx_level_complete.caf */; };
-		F940051B3074D18500BC6413 /* Hungry_Frog_vertaalsheet_07082026.gecorrigeerd.csv in Resources */ = {isa = PBXBuildFile; fileRef = F94005063074D18500BC6413 /* Hungry_Frog_vertaalsheet_07082026.gecorrigeerd.csv */; };
 		F940051C3074D18500BC6413 /* Products.storekit in Resources */ = {isa = PBXBuildFile; fileRef = F94004E13074D18500BC6413 /* Products.storekit */; };
-		F940051D3074D18500BC6413 /* Translations.csv in Resources */ = {isa = PBXBuildFile; fileRef = F940050A3074D18500BC6413 /* Translations.csv */; };
 		F940051E3074D18500BC6413 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F94004BF3074D18500BC6413 /* Assets.xcassets */; };
 		F940051F3074D18500BC6413 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = F94004D63074D18500BC6413 /* Localizable.xcstrings */; };
 		F94005203074D18500BC6413 /* sfx_high_score.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94004FA3074D18500BC6413 /* sfx_high_score.caf */; };
 		F94005213074D18500BC6413 /* sfx_good.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F94004F93074D18500BC6413 /* sfx_good.m4a */; };
 		F94005223074D18500BC6413 /* sfx_double_score.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94004F63074D18500BC6413 /* sfx_double_score.caf */; };
-		F94005233074D18500BC6413 /* Hungry_Frog_vertaalsheet_07082026.csv in Resources */ = {isa = PBXBuildFile; fileRef = F94005053074D18500BC6413 /* Hungry_Frog_vertaalsheet_07082026.csv */; };
-		F94005243074D18500BC6413 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = F94005073074D18500BC6413 /* README.md */; };
 		F94005253074D18500BC6413 /* sfx_wrong.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F94005023074D18500BC6413 /* sfx_wrong.m4a */; };
 		F94005263074D18500BC6413 /* sfx_life_pickup.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F94004FC3074D18500BC6413 /* sfx_life_pickup.m4a */; };
 		F94005273074D18500BC6413 /* sfx_card_flight.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94004F23074D18500BC6413 /* sfx_card_flight.caf */; };
@@ -87,6 +82,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A10000013074D18500BC6413 /* SpaceLionPlayfield.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceLionPlayfield.swift; sourceTree = "<group>"; };
+		A1B2C3D43074D18500BC6413 /* sfx_button_press.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = sfx_button_press.caf; sourceTree = "<group>"; };
 		F94004AD3074D11400BC6413 /* Space Lion.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Space Lion.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F94004BD3074D18500BC6413 /* AppAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudio.swift; sourceTree = "<group>"; };
 		F94004BE3074D18500BC6413 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
@@ -125,6 +122,8 @@
 		F94004E03074D18500BC6413 /* PremiumView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumView.swift; sourceTree = "<group>"; };
 		F94004E13074D18500BC6413 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Products.storekit; sourceTree = "<group>"; };
 		F94004E23074D18500BC6413 /* ProgressSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressSync.swift; sourceTree = "<group>"; };
+		A1TR00013074D18500BC6413 /* trailer-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = trailer-icon.png; sourceTree = "<group>"; };
+		A1TR00023074D18500BC6413 /* trailer-icon-original.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = trailer-icon-original.png; sourceTree = "<group>"; };
 		F94004E33074D18500BC6413 /* PromoStillCompositionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromoStillCompositionView.swift; sourceTree = "<group>"; };
 		F94004E43074D18500BC6413 /* TrailerCompositionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrailerCompositionView.swift; sourceTree = "<group>"; };
 		F94004E63074D18500BC6413 /* PromotedPurchaseCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromotedPurchaseCoordinator.swift; sourceTree = "<group>"; };
@@ -138,7 +137,6 @@
 		F94004EE3074D18500BC6413 /* ScreenSafeArea.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenSafeArea.swift; sourceTree = "<group>"; };
 		F94004EF3074D18500BC6413 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F94004F03074D18500BC6413 /* sfx_cannon_shoot.m4a */ = {isa = PBXFileReference; lastKnownFileType = file; path = sfx_cannon_shoot.m4a; sourceTree = "<group>"; };
-		A1B2C3D43074D18500BC6413 /* sfx_button_press.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = sfx_button_press.caf; sourceTree = "<group>"; };
 		F94004F13074D18500BC6413 /* sfx_card_count.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = sfx_card_count.caf; sourceTree = "<group>"; };
 		F94004F23074D18500BC6413 /* sfx_card_flight.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = sfx_card_flight.caf; sourceTree = "<group>"; };
 		F94004F33074D18500BC6413 /* sfx_card_reveal.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = sfx_card_reveal.caf; sourceTree = "<group>"; };
@@ -165,7 +163,6 @@
 		F94005083074D18500BC6413 /* translations.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = translations.py; sourceTree = "<group>"; };
 		F940050A3074D18500BC6413 /* Translations.csv */ = {isa = PBXFileReference; lastKnownFileType = text; path = Translations.csv; sourceTree = "<group>"; };
 		F940050B3074D18500BC6413 /* Tutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tutorial.swift; sourceTree = "<group>"; };
-		A10000013074D18500BC6413 /* SpaceLionPlayfield.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceLionPlayfield.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -279,6 +276,8 @@
 			children = (
 				F94004E33074D18500BC6413 /* PromoStillCompositionView.swift */,
 				F94004E43074D18500BC6413 /* TrailerCompositionView.swift */,
+				A1TR00013074D18500BC6413 /* trailer-icon.png */,
+				A1TR00023074D18500BC6413 /* trailer-icon-original.png */,
 			);
 			path = Promo;
 			sourceTree = "<group>";
@@ -351,7 +350,6 @@
 			isa = PBXResourcesBuildPhase;
 			files = (
 				F940050C3074D18500BC6413 /* sfx_double_card.caf in Resources */,
-				F940050D3074D18500BC6413 /* translations.py in Resources */,
 				F940050E3074D18500BC6413 /* sfx_turbo.m4a in Resources */,
 				F940050F3074D18500BC6413 /* sfx_cannon_shoot.m4a in Resources */,
 				A1B2C3D53074D18500BC6413 /* sfx_button_press.caf in Resources */,
@@ -366,16 +364,12 @@
 				F94005183074D18500BC6413 /* background_music.mp3 in Resources */,
 				F94005193074D18500BC6413 /* sfx_switch_off.caf in Resources */,
 				F940051A3074D18500BC6413 /* sfx_level_complete.caf in Resources */,
-				F940051B3074D18500BC6413 /* Hungry_Frog_vertaalsheet_07082026.gecorrigeerd.csv in Resources */,
 				F940051C3074D18500BC6413 /* Products.storekit in Resources */,
-				F940051D3074D18500BC6413 /* Translations.csv in Resources */,
 				F940051E3074D18500BC6413 /* Assets.xcassets in Resources */,
 				F940051F3074D18500BC6413 /* Localizable.xcstrings in Resources */,
 				F94005203074D18500BC6413 /* sfx_high_score.caf in Resources */,
 				F94005213074D18500BC6413 /* sfx_good.m4a in Resources */,
 				F94005223074D18500BC6413 /* sfx_double_score.caf in Resources */,
-				F94005233074D18500BC6413 /* Hungry_Frog_vertaalsheet_07082026.csv in Resources */,
-				F94005243074D18500BC6413 /* README.md in Resources */,
 				F94005253074D18500BC6413 /* sfx_wrong.m4a in Resources */,
 				F94005263074D18500BC6413 /* sfx_life_pickup.m4a in Resources */,
 				F94005273074D18500BC6413 /* sfx_card_flight.caf in Resources */,
@@ -571,15 +565,21 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = CAMERA_USAGE_DESCRIPTION;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIInterfaceOrientation = UIInterfaceOrientationLandscapeRight;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
-				INFOPLIST_KEY_UIRequiresFullScreen = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17;
@@ -615,15 +615,21 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = CAMERA_USAGE_DESCRIPTION;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIInterfaceOrientation = UIInterfaceOrientationLandscapeRight;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
-				INFOPLIST_KEY_UIRequiresFullScreen = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17;

@@ -9,14 +9,70 @@ import UIKit
 #endif
 
 #if canImport(UIKit)
-/// The complete app is played in landscape. Keeping the runtime mask aligned
-/// with the generated Info.plist prevents sheets and full-screen covers from
-/// briefly rotating through portrait during presentation.
+/// The complete app is played in landscape, on iPhone and on iPad. Keeping the
+/// runtime mask aligned with the generated Info.plist prevents sheets and
+/// full-screen covers from briefly rotating through portrait during presentation.
+/// iPadOS 26 and later can still open a scene in portrait when windowing ignores
+/// the property list, so every scene is asked to return to landscape as well.
 final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        return true
+    }
+
     func application(_ application: UIApplication,
                      supportedInterfaceOrientationsFor window: UIWindow?)
     -> UIInterfaceOrientationMask {
         .landscape
+    }
+}
+
+enum LandscapeLock {
+    static func enforce() {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        for scene in scenes {
+            let orientation = scene.effectiveGeometry.interfaceOrientation
+            guard !orientation.isLandscape else { continue }
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
+            scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
+    }
+}
+
+/// A zero-size controller consulted while the scene is on screen. Its mask
+/// matches the app delegate, and appearing is what re-requests landscape if
+/// iPad presented the window in portrait.
+private struct LandscapeLockInstaller: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> LandscapeLockController {
+        LandscapeLockController()
+    }
+
+    func updateUIViewController(_ controller: LandscapeLockController, context: Context) {
+        controller.lockIfNeeded()
+    }
+}
+
+private final class LandscapeLockController: UIViewController {
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .landscapeRight }
+    override var prefersInterfaceOrientationLocked: Bool { true }
+    override var shouldAutorotate: Bool { true }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        lockIfNeeded()
+    }
+
+    func lockIfNeeded() {
+        LandscapeLock.enforce()
+        setNeedsUpdateOfSupportedInterfaceOrientations()
     }
 }
 #endif
@@ -104,6 +160,20 @@ struct ElephantChallengeApp: App {
                     // Dark Mode turns system fills black and inverts `.primary` /
                     // `.secondary` labels against those same light colours.
                     .preferredColorScheme(.light)
+#if canImport(UIKit)
+                    .background {
+                        LandscapeLockInstaller()
+                            .frame(width: 0, height: 0)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                    .onAppear { LandscapeLock.enforce() }
+                    .onReceive(NotificationCenter.default.publisher(
+                        for: UIDevice.orientationDidChangeNotification
+                    )) { _ in
+                        LandscapeLock.enforce()
+                    }
+#endif
                     .sheet(isPresented: Binding(
                         get: { promotedPurchase.isAwaitingParentApproval },
                         set: { isPresented in

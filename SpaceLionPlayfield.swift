@@ -901,28 +901,80 @@ extension SpaceLionPlayfield {
 
         /// The answer bank starts immediately below the overhead rail. The
         /// proportional nudge keeps the same visual breathing room on a short
-        /// phone and a large iPad instead of relying on one device-sized gap.
+        /// phone instead of relying on one device-sized gap. iPad places the
+        /// bank between its own roof and deck, below.
         private var columnTop: CGFloat {
-            topReserve + max(isPad ? 14 : 8, size.height * 0.018)
+            topReserve + max(8, size.height * 0.018)
         }
         private var columnBottom: CGFloat {
-            let safeBottom = size.height - max(bottomReserve, isPad ? 16 : 8)
+            let safeBottom = size.height - max(bottomReserve, 8)
             // End the answer bank just above the deck. The larger modules sit
             // lower here while the last answer still clears the foreground
             // console instead of floating against the bottom edge.
-            return min(safeBottom - size.height * (isPad ? 0.10 : 0.08),
-                       size.height * (isPad ? 0.78 : 0.80))
+            return min(safeBottom - size.height * 0.08,
+                       size.height * 0.80)
         }
         private var slotHeight: CGFloat {
             max(1, (columnBottom - columnTop) / CGFloat(GameConfig.answerColumnCount))
         }
 
+        /// Roof and deck for a landscape iPad. The phone layout fills a short
+        /// canvas from the top, so on a 13-inch iPad the unused height all
+        /// becomes floor and the ceiling stays a thin lid. These two bands are
+        /// almost the same depth: the roof grows down from the HUD, the deck
+        /// stays just deep enough for the launch pad.
+        private struct PadRoom {
+            /// Glass top. The HUD is centred inside this band.
+            let visualCeiling: CGFloat
+            let ceilingJointY: CGFloat
+            let floorTop: CGFloat
+            let answerSize: CGFloat
+            let firstRowY: CGFloat
+        }
+
+        private var padRoom: PadRoom {
+            let count = CGFloat(max(1, GameConfig.answerColumnCount))
+            // Roof and deck share one pair of bands, 60/40. The roof is the
+            // deeper one because it also carries the instruments.
+            let visualCeiling = max(size.height * 0.335 * 0.60, topReserve + 6)
+            let visualFloor = visualCeiling * (0.40 / 0.60)
+            let header: CGFloat = 26
+            let ceilingJointY = visualCeiling - header
+            // `bottom` sits one frame-and-sill below this joint, which is the
+            // visible floor the player compares with the roof.
+            let floorTop = min(size.height - max(bottomReserve, 16),
+                               size.height - visualFloor + 27)
+            let ledClearance: CGFloat = 32
+            let flange: CGFloat = 0.56
+            let seam: CGFloat = 1.12
+            let divisor = flange * 2 + max(0, count - 1) * seam
+            let span = max(1, floorTop - ceilingJointY)
+            let fitted = max(1, (span - ledClearance * 2) / max(divisor, 1))
+            let answerSize = min(fitted,
+                                 size.width * 0.168,
+                                 size.height * 0.230)
+            let slack = max(0, span - ledClearance * 2 - answerSize * divisor)
+            let firstRowY = ceilingJointY + ledClearance + slack * 0.5 + answerSize * flange
+            return PadRoom(visualCeiling: visualCeiling,
+                           ceilingJointY: ceilingJointY,
+                           floorTop: floorTop,
+                           answerSize: answerSize,
+                           firstRowY: firstRowY)
+        }
+
+        /// Height of the roof band the HUD is centred in. Phone uses the
+        /// reserved instrument strip under the status bar.
+        var ceilingBand: CGFloat {
+            isPad ? padRoom.visualCeiling : topReserve + 10
+        }
+
         var answerSize: CGFloat {
+            if isPad { return padRoom.answerSize }
             // `size` is the complete mechanical module; the illuminated stone
             // inside remains comfortably above the 44 pt touch minimum.
-            min(max(slotHeight * 1.09, isPad ? 103 : 80),
-                isPad ? 181 : 132,
-                size.width * 0.194)
+            return min(max(slotHeight * 1.09, 80),
+                       132,
+                       size.width * 0.194)
         }
         /// Physical cabinet visible outside the answer modules. Keeping this
         /// proportional (and capped by the module size) leaves enough room for
@@ -931,11 +983,12 @@ extension SpaceLionPlayfield {
         private var cabinetDepth: CGFloat {
             min(size.width * 0.04, answerSize * 0.34)
         }
+        private var sideMargin: CGFloat { isPad ? 44 : 8 }
         private var leftX: CGFloat {
-            max(leftReserve, isPad ? 16 : 8) + cabinetDepth + answerSize * 0.56
+            max(leftReserve, sideMargin) + cabinetDepth + answerSize * 0.56
         }
         private var rightX: CGFloat {
-            size.width - max(rightReserve, isPad ? 16 : 8) - cabinetDepth - answerSize * 0.56
+            size.width - max(rightReserve, sideMargin) - cabinetDepth - answerSize * 0.56
         }
 
         /// Three controls in each side column, read top to bottom: the lowest
@@ -943,13 +996,20 @@ extension SpaceLionPlayfield {
         /// deliberately on one vertical axis: perspective belongs to the room
         /// around the controls, never to the control alignment itself.
         var answerPoints: [CGPoint] {
-            // Keep the first row exactly where it was. The fixed mounting
-            // flange painted behind each interactive module is 112% of the
-            // button size, so that complete visible housing—not merely the
-            // tappable face—defines the pitch. Adjacent housings now meet at
-            // one clean seam without either one hanging over the next.
-            let firstRowY = columnTop + slotHeight * 0.5
-            let housingPitch = answerSize * 1.12
+            // The fixed mounting flange painted behind each interactive module
+            // is 112% of the button size, so that complete visible housing—not
+            // merely the tappable face—defines the pitch. Adjacent housings
+            // meet at one clean seam without either one hanging over the next.
+            let firstRowY: CGFloat
+            let housingPitch: CGFloat
+            if isPad {
+                let room = padRoom
+                firstRowY = room.firstRowY
+                housingPitch = room.answerSize * 1.12
+            } else {
+                firstRowY = columnTop + slotHeight * 0.5
+                housingPitch = answerSize * 1.12
+            }
             let rows = (0..<GameConfig.answerColumnCount).map {
                 firstRowY + housingPitch * CGFloat($0)
             }
@@ -971,23 +1031,39 @@ extension SpaceLionPlayfield {
             // Keep the ceiling joint where it already clears the HUD, but let
             // the actual glass begin lower. The space between both becomes a
             // deliberate instrument header instead of an accidental dark rim.
-            let ceilingJointY = topReserve - frameWidth * 0.5
-            let top = topReserve + (isPad ? 16 : 10)
-            let rows = answerPoints.prefix(GameConfig.answerColumnCount)
-            let lastAnswerY = rows.last?.y ?? columnBottom
-            // One shared horizon for the whole room. The answer rack, the
-            // screen sill and the side walls all meet the floor here.
-            let floorTop = min(size.height - max(bottomReserve, isPad ? 16 : 8),
+            // On iPad the joint and the deck come from one shared room, so a
+            // taller canvas cannot leave the floor twice as deep as the roof.
+            let ceilingJointY: CGFloat
+            let top: CGFloat
+            let floorTop: CGFloat
+            if isPad {
+                let room = padRoom
+                ceilingJointY = room.ceilingJointY
+                top = room.visualCeiling
+                floorTop = room.floorTop
+            } else {
+                ceilingJointY = topReserve - frameWidth * 0.5
+                top = topReserve + 10
+                let rows = answerPoints.prefix(GameConfig.answerColumnCount)
+                let lastAnswerY = rows.last?.y ?? columnBottom
+                // One shared horizon for the whole room. The answer rack, the
+                // screen sill and the side walls all meet the floor here.
+                floorTop = min(size.height - max(bottomReserve, 8),
                                lastAnswerY + answerSize * 0.64)
+            }
             let sillDepth: CGFloat = isPad ? 14 : 9
             // Let the outside view continue down until only the physical lower
             // frame and its shallow sill remain above the shared floor line.
             let bottom = max(top + 60,
                              floorTop - frameWidth * 0.5 - sillDepth)
+            // On iPad the larger stones already narrow the glass. A further
+            // inset keeps the viewport from simply growing taller when the
+            // roof and deck give up that space.
+            let glassInsetX: CGFloat = isPad ? 28 : 0
             return CockpitLayout(
-                windowRect: CGRect(x: leftEdge + frameOuterReach,
+                windowRect: CGRect(x: leftEdge + frameOuterReach + glassInsetX,
                                    y: top,
-                                   width: max(60, rightEdge - leftEdge - frameOuterReach * 2),
+                                   width: max(60, rightEdge - leftEdge - frameOuterReach * 2 - glassInsetX * 2),
                                    height: bottom - top),
                 ceilingJointY: ceilingJointY,
                 floorTop: floorTop,
@@ -998,11 +1074,17 @@ extension SpaceLionPlayfield {
                 buttonSize: answerSize)
         }
 
-        /// Shared with the HUD so the pause control is centred over the left
-        /// answer column and the score panel mirrors that same offset beside
-        /// the right column. Both outer HUD edges are therefore equidistant
-        /// from their answer axes and the complete instrument rail is centred.
+        /// Phone: the pause control is centred over the left answer column and
+        /// the score panel mirrors that offset beside the right column.
+        /// iPad: the rail runs from the outer face of the left answer stone to
+        /// the outer face of the right one, so the instruments share the
+        /// cabinet width instead of floating in a narrower strip.
         func hudInsets(pauseWidth: CGFloat) -> (leading: CGFloat, trailing: CGFloat) {
+            if isPad {
+                let leading = max(leftReserve, leftX - answerSize * 0.5)
+                let trailing = max(rightReserve, size.width - rightX - answerSize * 0.5)
+                return (leading, trailing)
+            }
             let leading = max(0, leftX - pauseWidth / 2)
             let trailing = max(0, size.width - (rightX + pauseWidth / 2))
             return (leading, trailing)
@@ -1626,7 +1708,21 @@ private struct SpaceshipCockpit: View {
     /// Only the near side of the foreground platform enters the screen. This
     /// keeps its complete upper arc visible while preserving a strip of deck
     /// between that arc and the newly lowered floor joint.
-    private var platformVisibleFraction: CGFloat { 0.40 }
+    private var platformVisibleFraction: CGFloat { isPad ? 0.52 : 0.40 }
+
+    /// The launch pad sits on the deck. iPad draws a wider disc so the
+    /// shallower floor still reads as occupied rather than as empty plating.
+    private func platformDisc(in size: CGSize) -> CGRect {
+        let width = isPad
+            ? size.width * 0.50
+            : min(size.width * 0.40, layout.windowRect.width * 0.62)
+        let floorDepth = max(1, size.height - layout.floorTop)
+        let height = min(width * 0.30, floorDepth * 1.5)
+        return CGRect(x: size.width / 2 - width / 2,
+                      y: size.height - height * platformVisibleFraction,
+                      width: width,
+                      height: height)
+    }
     /// How strongly the near edge of each side wall opens toward the viewer.
     /// The wall panels and the wall/floor joint must use this exact same
     /// projection or the cockpit stops reading as one coherent 3D box.
@@ -2462,9 +2558,9 @@ private struct SpaceshipCockpit: View {
                                 startsWithWarmLight: Bool,
                                 phase: CGFloat?) {
         guard points.count > 1 else { return }
-        let preferredDash: CGFloat = isPad ? 48 : 31
-        let preferredGap: CGFloat = isPad ? 30 : 19
-        let thickness: CGFloat = isPad ? 3.4 : 2.2
+        let preferredDash: CGFloat = isPad ? 74 : 31
+        let preferredGap: CGFloat = isPad ? 44 : 19
+        let thickness: CGFloat = isPad ? 5.6 : 2.2
         if let phase {
             drawMovingLightChain(in: context,
                                  points: points,
@@ -2721,7 +2817,7 @@ private struct SpaceshipCockpit: View {
             seam(deck, from: CGPoint(x: 0, y: y), to: CGPoint(x: size.width, y: y))
         }
 
-        drawPlatform(in: deck, size: size, floorDepth: depth, time: time)
+        drawPlatform(in: deck, size: size, time: time)
 
         var floorJoint = Path()
         floorJoint.move(to: CGPoint(x: 0, y: leftOuterTop))
@@ -2736,13 +2832,10 @@ private struct SpaceshipCockpit: View {
                        lineWidth: isPad ? 1.5 : 1)
     }
 
-    private func drawPlatform(in context: GraphicsContext, size: CGSize, floorDepth: CGFloat, time: TimeInterval) {
-        let width = min(size.width * 0.40, layout.windowRect.width * 0.62)
-        let height = min(width * 0.30, floorDepth * 1.5)
-        let pad = CGRect(x: size.width / 2 - width / 2,
-                         y: size.height - height * platformVisibleFraction,
-                         width: width,
-                         height: height)
+    private func drawPlatform(in context: GraphicsContext, size: CGSize, time: TimeInterval) {
+        let pad = platformDisc(in: size)
+        let width = pad.width
+        let height = pad.height
         let centre = CGPoint(x: pad.midX, y: pad.midY)
         let pulse = 0.75 + 0.25 * sin(time * 1.6)
 
@@ -3479,13 +3572,9 @@ private struct SpaceshipCockpit: View {
     private func drawPlatformPulse(in context: GraphicsContext,
                                    size: CGSize,
                                    time: TimeInterval) {
-        let floorDepth = max(1, size.height - layout.windowRect.maxY)
-        let width = min(size.width * 0.40, layout.windowRect.width * 0.62)
-        let height = min(width * 0.30, floorDepth * 1.5)
-        let pad = CGRect(x: size.width / 2 - width / 2,
-                         y: size.height - height * platformVisibleFraction,
-                         width: width,
-                         height: height)
+        let pad = platformDisc(in: size)
+        let width = pad.width
+        let height = pad.height
         let ring = pad.insetBy(dx: width * 0.13, dy: height * 0.13)
         let pulse = 0.45 + 0.35 * (0.5 + 0.5 * sin(time * 1.8))
         var glow = context
