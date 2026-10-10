@@ -3,7 +3,9 @@
 //  Math Memory
 //
 //  Home screen: a wide landscape toolbar with the player and streak on the
-//  left, the session choices on the right, and a four-column level grid below.
+//  left, the session choices on the right, and the level grid below. iPhone
+//  keeps four columns; iPad uses three so the twelve free levels fill the
+//  height as four rows.
 //
 
 import SwiftUI
@@ -62,7 +64,8 @@ struct HomeView: View {
     @State private var nameDraft = ""
     @State private var infoPopup: InfoPopup?
     @State private var controlAnchors: [String: CGRect] = [:]
-    @State private var viewportWidth: CGFloat = 0
+    @State private var viewportWidth: CGFloat = HomeView.seededWindowSize.width
+    @State private var viewportHeight: CGFloat = HomeView.seededWindowSize.height
     @State private var suppressTopicTap = false
     /// The brief return-to-menu celebration after a session earned cards.
     @State private var celebration: ScoreCelebration?
@@ -108,9 +111,8 @@ struct HomeView: View {
 
     private var menuScale: CGFloat { isPad ? 1.4 : 1 }
     private var menuControlSpacing: CGFloat { isPad ? 14 : 10 }
-    private var modeButtonHeight: CGFloat { isPad ? 48 : 37 }
+    private var modeButtonHeight: CGFloat { isPad ? 58 : 37 }
     private var levelGridSpacing: CGFloat { isPad ? 16 : 10 }
-    private var levelCardHeight: CGFloat { isPad ? 124 : 88 }
     private var menuCardPadding: CGFloat { isPad ? 20 : 13 }
     private var menuCardSpacing: CGFloat { isPad ? 24 : 14 }
     /// The character is exactly as tall as the two control rows beside it — the
@@ -118,26 +120,85 @@ struct HomeView: View {
     private var characterBox: CGFloat {
         topicButtonDiameter + menuControlSpacing + modeButtonHeight
     }
-    private var streakBarHeight: CGFloat { isPad ? 32 : 24 }
+    private var streakBarHeight: CGFloat { isPad ? 36 : 24 }
     /// Where the divider sits. The player side only has to carry the character,
     /// three short lines and the streak bar, so the controls get the wider half.
-    private var playerPanelWidth: CGFloat { isPad ? 458 : 325 }
+    /// iPad gives the name and the two score lines room to sit larger next to
+    /// the level cards.
+    private var playerPanelWidth: CGFloat { isPad ? 530 : 325 }
 
-    /// A real lazy grid needs concrete columns. The app is landscape and tops
-    /// out at four; compact windows can still fall back to fewer without ever
-    /// squeezing a card below its readable minimum.
+    /// Side inset and the width inside it. iPhone keeps the shared landscape
+    /// canvas. On iPad the previous inset was the 28pt gutter plus whatever the
+    /// 1180pt cap left empty on a wide screen; that whole margin is halved so
+    /// the level grid can use the width that used to sit beside it.
+    private struct MenuCanvas {
+        var inset: CGFloat
+        var contentWidth: CGFloat
+    }
+
+    private func menuCanvas(for screenWidth: CGFloat) -> MenuCanvas {
+        let gutter = AppLayout.landscapeGutter
+        guard screenWidth > 1 else {
+            return MenuCanvas(inset: gutter, contentWidth: 0)
+        }
+        if !isPad {
+            let content = min(AppLayout.landscapeContentWidth, screenWidth - gutter * 2)
+            return MenuCanvas(inset: gutter, contentWidth: max(0, content))
+        }
+        let legacyFrame = min(screenWidth, AppLayout.landscapeContentWidth + gutter * 2)
+        let legacyInset = (screenWidth - legacyFrame) / 2 + gutter
+        let inset = max(12, (legacyInset / 2).rounded())
+        return MenuCanvas(inset: inset, contentWidth: max(0, screenWidth - inset * 2))
+    }
+
+    /// iPhone stays at up to four columns. iPad lays the twelve free levels out
+    /// as three columns, which is four rows and fills the height the four-by-three
+    /// grid left empty. A very narrow window drops to two so a card stays tappable.
+    private var levelColumnCount: Int {
+        let canvas = menuCanvas(for: viewportWidth)
+        if !isPad {
+            let width = canvas.contentWidth > 1 ? canvas.contentWidth : AppLayout.landscapeContentWidth
+            let minimum: CGFloat = 118
+            let fitting = Int(((width + levelGridSpacing) / (minimum + levelGridSpacing)).rounded(.down))
+            return min(4, max(1, fitting))
+        }
+        return canvas.contentWidth > 1 && canvas.contentWidth < 520 ? 2 : 3
+    }
+
     private var levelGridColumns: [GridItem] {
-        let fallbackWidth = AppLayout.landscapeContentWidth
-        let width = viewportWidth > 0
-            ? min(AppLayout.landscapeContentWidth,
-                  max(0, viewportWidth - AppLayout.landscapeGutter * 2))
-            : fallbackWidth
-        let minimum = isPad ? CGFloat(210) : CGFloat(118)
-        let fitting = Int(((width + levelGridSpacing)
-            / (minimum + levelGridSpacing)).rounded(.down))
-        let count = min(4, max(1, fitting))
-        return Array(repeating: GridItem(.flexible(), spacing: levelGridSpacing),
-                     count: count)
+        Array(repeating: GridItem(.flexible(), spacing: levelGridSpacing),
+              count: levelColumnCount)
+    }
+
+    /// iPhone cards keep their fixed height. iPad cards grow so the free levels
+    /// and the premium banner together fill the screen, instead of leaving the
+    /// lower half of a 13-inch display empty.
+    private var levelCardHeight: CGFloat {
+        guard isPad else { return 88 }
+        let viewport = viewportHeight
+        guard viewport > 1 else { return 124 }
+        let rows = CGFloat(max(1, Int((CGFloat(GameConfig.freeLevelCount) / CGFloat(levelColumnCount)).rounded(.up))))
+        let header = characterBox + menuCardPadding * 2
+        let betweenHeaderAndGrid: CGFloat = 22
+        let banner = premium.isPremium ? CGFloat(0) : premiumBannerBlock
+        let gridSpacing = levelGridSpacing * (rows - 1)
+        let chrome = AppLayout.landscapeGutter * 2
+            + header
+            + betweenHeaderAndGrid
+            + gridSpacing
+            + banner
+            + 8
+        let fitted = (viewport - chrome) / rows
+        return min(172, max(100, fitted.rounded(.toNearestOrAwayFromZero)))
+    }
+
+    /// The gap above the "more levels" banner, plus the banner's padding and
+    /// its two lines. Used only to budget the level-card height.
+    private var premiumBannerBlock: CGFloat {
+        let vertical: CGFloat = 20
+        let title: CGFloat = 24
+        let subtitle: CGFloat = 20
+        return 14 + vertical * 2 + title + 2 + subtitle
     }
 
     /// The room the topics and the row under them have, worked out from the same
@@ -145,18 +206,36 @@ struct HomeView: View {
     /// size themselves to the screen without a nested `GeometryReader` — and the
     /// character, which has to match their height, can read that height too.
     private var controlColumnWidth: CGFloat {
-        let available = min(AppLayout.landscapeContentWidth,
-                            max(0, viewportWidth - AppLayout.landscapeGutter * 2))
-        return available - menuCardPadding * 2 - playerPanelWidth - menuCardSpacing * 2 - 1
+        let content = menuCanvas(for: viewportWidth).contentWidth
+        return max(0, content - menuCardPadding * 2 - playerPanelWidth - menuCardSpacing * 2 - 1)
+    }
+
+    /// Window size inside the safe area, used to lay the iPad menu out on the
+    /// first frame. Reading it on every frame wedges SwiftUI's update pass, so
+    /// it only seeds state until the live geometry arrives.
+    private static var seededWindowSize: CGSize {
+#if canImport(UIKit)
+        guard AppLayout.isPad else { return .zero }
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }
+        guard let window else { return .zero }
+        let insets = window.safeAreaInsets
+        return CGSize(width: max(0, window.bounds.width - insets.left - insets.right),
+                      height: max(0, window.bounds.height - insets.top - insets.bottom))
+#else
+        return .zero
+#endif
     }
 
     /// The six topic circles grow to fill their row, so what is left between them
-    /// is a deliberate gap rather than leftover space. They stop growing at a
-    /// size that keeps the whole header comfortably short.
+    /// is a deliberate gap rather than leftover space. On iPad they stop at a
+    /// size that still reads clearly next to the large level cards.
     private var topicButtonDiameter: CGFloat {
         let gap: CGFloat = isPad ? 12 : 8
         let fits = (controlColumnWidth - gap * 5) / 6
-        return min(isPad ? 68 : 46, max(isPad ? 58 : 38, fits))
+        return min(isPad ? 84 : 46, max(isPad ? 64 : 38, fits))
     }
 
     var body: some View {
@@ -164,10 +243,8 @@ struct HomeView: View {
             SpaceMenuBackground(accent: character.color)
 
             GeometryReader { proxy in
+                let canvas = menuCanvas(for: proxy.size.width)
                 ScrollView {
-                    let available = min(AppLayout.landscapeContentWidth,
-                                        proxy.size.width - AppLayout.landscapeGutter * 2)
-
                     VStack(alignment: .leading, spacing: isPad ? 22 : 14) {
                         menuCard
                             .zIndex(1)
@@ -175,12 +252,17 @@ struct HomeView: View {
                             .frame(maxWidth: .infinity, alignment: .topLeading)
                             .zIndex(0)
                     }
-                    .padding(AppLayout.landscapeGutter)
-                    .frame(width: available + AppLayout.landscapeGutter * 2)
+                    .padding(.horizontal, canvas.inset)
+                    .padding(.vertical, AppLayout.landscapeGutter)
+                    .frame(width: canvas.contentWidth + canvas.inset * 2)
                     .frame(maxWidth: .infinity)
                 }
-                .onAppear { viewportWidth = proxy.size.width }
+                .onAppear {
+                    viewportWidth = proxy.size.width
+                    viewportHeight = proxy.size.height
+                }
                 .onChange(of: proxy.size.width) { _, width in viewportWidth = width }
+                .onChange(of: proxy.size.height) { _, height in viewportHeight = height }
                 .onPreferenceChange(ControlAnchorKey.self) { controlAnchors = $0 }
                 .onPreferenceChange(CardGlyphAnchorKey.self) { cardGlyphAnchors = $0 }
                 .overlay(alignment: .topLeading) { infoPopoutOverlay }
@@ -321,13 +403,13 @@ struct HomeView: View {
         HStack(alignment: .center, spacing: isPad ? 16 : 10) {
             characterButton
 
-            VStack(alignment: .leading, spacing: isPad ? 4 : 3) {
+            VStack(alignment: .leading, spacing: isPad ? 6 : 3) {
                 Button {
                     nameDraft = playerName
                     showNameEditor = true
                 } label: {
                     Text(verbatim: displayName)
-                        .font(.system(size: isPad ? 28 : 18, weight: .heavy, design: .rounded))
+                        .font(.system(size: isPad ? 36 : 18, weight: .heavy, design: .rounded))
                         .lineLimit(1)
                         .minimumScaleFactor(0.58)
                 }
@@ -402,8 +484,8 @@ struct HomeView: View {
         let total = headerCount(start: celebration?.totalStart,
                                 heldStart: lastPlayedTotal,
                                 current: totalCards)
-        return HStack(spacing: isPad ? 7 : 5) {
-            CurrencyIcon(size: isPad ? 20 : 14)
+        return HStack(spacing: isPad ? 8 : 5) {
+            CurrencyIcon(size: isPad ? 26 : 14)
                 .scaleEffect(highlightsHeaderCards ? 1.32 : 1)
                 .rotationEffect(.degrees(highlightsHeaderCards ? -10 : 0))
             CountingNumber(from: total.from,
@@ -412,7 +494,7 @@ struct HomeView: View {
                            duration: Self.headerCountDuration)
             Text("home.totalLabel")
         }
-        .font(.system(size: isPad ? 20 : 14, weight: .bold, design: .rounded))
+        .font(.system(size: isPad ? 26 : 14, weight: .bold, design: .rounded))
         .foregroundStyle(character.deepColor)
         .lineLimit(1)
         .minimumScaleFactor(0.7)
@@ -448,10 +530,10 @@ struct HomeView: View {
         let count = headerCount(start: celebration?.topicStart,
                                 heldStart: lastPlayedTopic,
                                 current: topicCards)
-        return HStack(spacing: isPad ? 7 : 5) {
+        return HStack(spacing: isPad ? 8 : 5) {
             // The card that flies up from the level card aims here, so the
             // reward visibly joins this topic before the totals move.
-            CurrencyIcon(size: isPad ? 20 : 14)
+            CurrencyIcon(size: isPad ? 26 : 14)
                 .scaleEffect(highlightsHeaderCards ? 1.32 : 1)
                 .rotationEffect(.degrees(highlightsHeaderCards ? -10 : 0))
                 .reportAnchor("topicTotal")
@@ -461,7 +543,7 @@ struct HomeView: View {
                            duration: Self.headerCountDuration)
             Text(verbatim: L(key: topic.titleKey))
         }
-        .font(.system(size: isPad ? 20 : 14, weight: .bold, design: .rounded))
+        .font(.system(size: isPad ? 26 : 14, weight: .bold, design: .rounded))
         .foregroundStyle(character.deepColor)
         .lineLimit(1)
         .minimumScaleFactor(0.7)
@@ -602,7 +684,7 @@ struct HomeView: View {
                     }
                 } label: {
                     Text(verbatim: L(key: mode.titleKey(for: topic)))
-                        .font(.system(size: isPad ? 20 : 14.5, weight: .bold, design: .rounded))
+                        .font(.system(size: isPad ? 25 : 14.5, weight: .bold, design: .rounded))
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
                         .frame(maxWidth: .infinity)
@@ -703,7 +785,7 @@ struct HomeView: View {
     /// stop fitting — on the narrowest phone the four buttons still have to sit
     /// side by side, so there the glyphs give way rather than the layout.
     private var supermixSlotWidth: CGFloat {
-        let base: CGFloat = isPad ? 22 : 14
+        let base: CGFloat = isPad ? 30 : 14
         guard controlColumnWidth > 0 else { return base }
         let variants = MixedVariant.allCases
         let slots = variants.reduce(CGFloat.zero) { total, variant in
@@ -715,7 +797,7 @@ struct HomeView: View {
         let fixed = supermixSlotSpacing * CGFloat(spacings)
             + supermixGap * CGFloat(variants.count - 1)
             + supermixMinimumInset * CGFloat(variants.count * 2)
-        return min(base, max(isPad ? 14 : 9, (controlColumnWidth - fixed) / slots))
+        return min(base, max(isPad ? 18 : 9, (controlColumnWidth - fixed) / slots))
     }
 
     /// What a button's operators occupy on their own, before any padding — the

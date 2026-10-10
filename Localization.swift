@@ -489,6 +489,7 @@ extension View {
 /// A flag with a chevron. Tap to choose a language; the current one is ticked.
 struct LanguagePicker: View {
     @ObservedObject private var language = LanguageManager.shared
+    @State private var showsLanguages = false
 
     /// Colour for the chevron so it can sit on light or dark backgrounds.
     var tint: Color = .secondary
@@ -497,33 +498,110 @@ struct LanguagePicker: View {
     var scale: CGFloat = 1
 
     var body: some View {
+        if AppLayout.isPad {
+            padPicker
+        } else {
+            phoneMenu
+        }
+    }
+
+    /// iPhone keeps the system menu. It is already the right size for that screen.
+    private var phoneMenu: some View {
         Menu {
             ForEach(AppLanguage.all) { option in
-                Button {
-                    language.select(option)
-                } label: {
-                    // Flag + endonym are already runtime strings and must not
-                    // be treated as a localizable key, so compose them verbatim.
-                    let title = Text(verbatim: "\(option.flag)  \(option.displayName)")
-                    if language.effective == option {
-                        Label { title } icon: { Image(systemName: "checkmark") }
-                    } else {
-                        title
-                    }
-                }
+                languageButton(option)
             }
         } label: {
-            HStack(spacing: 5) {
-                Text(language.effective.flag)
-                    .font(.system(size: 20 * scale))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10 * scale, weight: .bold))
-                    .foregroundStyle(tint)
+            pickerLabel
+        }
+    }
+
+    /// The system menu stays at a phone point size on iPad, which reads small
+    /// next to the enlarged Premium controls. A popover can carry the same
+    /// list at the size of the other iPad pop-outs.
+    private var padPicker: some View {
+        Button {
+            showsLanguages = true
+        } label: {
+            pickerLabel
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showsLanguages, arrowEdge: .top) {
+            languageList
+                .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private var pickerLabel: some View {
+        HStack(spacing: 5) {
+            Text(language.effective.flag)
+                .font(.system(size: 20 * scale))
+            Image(systemName: "chevron.down")
+                .font(.system(size: 10 * scale, weight: .bold))
+                .foregroundStyle(tint)
+        }
+        .padding(.horizontal, 12 * scale)
+        .padding(.vertical, 8 * scale)
+        .liquidGlassCapsule()
+        .contentShape(Capsule())
+    }
+
+    private func languageButton(_ option: AppLanguage) -> some View {
+        Button {
+            language.select(option)
+        } label: {
+            // Flag + endonym are already runtime strings and must not
+            // be treated as a localizable key, so compose them verbatim.
+            let title = Text(verbatim: "\(option.flag)  \(option.displayName)")
+            if language.effective == option {
+                Label { title } icon: { Image(systemName: "checkmark") }
+            } else {
+                title
             }
-            .padding(.horizontal, 12 * scale)
-            .padding(.vertical, 8 * scale)
-            .liquidGlassCapsule()
-            .contentShape(Capsule())
+        }
+    }
+
+    private var languageList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 4) {
+                    ForEach(AppLanguage.all) { option in
+                        let selected = language.effective == option
+                        Button {
+                            language.select(option)
+                            showsLanguages = false
+                        } label: {
+                            HStack(spacing: 14) {
+                                Text(verbatim: option.flag)
+                                    .font(.system(size: 30))
+                                Text(verbatim: option.displayName)
+                                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Spacer(minLength: 12)
+                                if selected {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 18, weight: .bold))
+                                        .foregroundStyle(.primary)
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+                            .background(selected ? Color.primary.opacity(0.08) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .id(option.id)
+                    }
+                }
+                .padding(12)
+            }
+            .frame(width: 380, height: 520)
+            .onAppear {
+                DispatchQueue.main.async {
+                    proxy.scrollTo(language.effective.id, anchor: .center)
+                }
+            }
         }
     }
 }

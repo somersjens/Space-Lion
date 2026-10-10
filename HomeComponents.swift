@@ -131,42 +131,64 @@ struct DailyGoalPicker: View {
 
     private var goalPeriod: GoalPeriod { GoalPeriod(rawValue: goalPeriodRaw) ?? .weekly }
     private let goalOptions = Array(stride(from: 5, through: 60, by: 5))
+    private var isPad: Bool { AppLayout.isPad }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: isPad ? 18 : 12) {
             Text("goal.title")
-                .font(.headline)
-            Picker("goal.period", selection: $goalPeriodRaw) {
-                ForEach(GoalPeriod.allCases) { period in
-                    Text(period.title).tag(period.rawValue)
-                }
-            }
-            .pickerStyle(.segmented)
+                .font(isPad
+                      ? .system(size: 30, weight: .heavy, design: .rounded)
+                      : .headline)
+                .foregroundStyle(isPad ? theme.deepColor : .primary)
+            periodPicker
 
             Text(goalPeriod == .weekly ? "goal.promptWeekly" : "goal.promptDaily")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(isPad
+                      ? .system(size: 20, weight: .semibold, design: .rounded)
+                      : .caption)
+                .foregroundStyle(isPad ? theme.deepColor.opacity(0.7) : .secondary)
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: isPad ? 12 : 8), count: 4),
+                      spacing: isPad ? 12 : 8) {
                 ForEach(goalOptions, id: \.self) { minutes in
                     Button {
                         goalPeriod == .weekly ? tracker.setWeeklyGoal(minutes) : tracker.setDailyGoal(minutes)
                     } label: {
                         Text(verbatim: "\(minutes)")
                     }
-                    .font(.subheadline.weight(.bold))
-                    .frame(maxWidth: .infinity, minHeight: 36)
+                    .font(isPad
+                          ? .system(size: 24, weight: .bold, design: .rounded)
+                          : .subheadline.weight(.bold))
+                    .frame(maxWidth: .infinity, minHeight: isPad ? 56 : 36)
                     .background(selectedGoalMinutes == minutes ? theme.color : .white,
-                                in: RoundedRectangle(cornerRadius: 10))
+                                in: RoundedRectangle(cornerRadius: isPad ? 14 : 10))
                     .foregroundStyle(selectedGoalMinutes == minutes ? .white : theme.deepColor)
                 }
             }
         }
-        .frame(width: 280)
+        .frame(width: isPad ? 440 : 280)
     }
 
     private var selectedGoalMinutes: Int {
         goalPeriod == .weekly ? tracker.weeklyGoalMinutes : tracker.dailyGoalMinutes
+    }
+
+    private var periodPicker: some View {
+        let picker = Picker("goal.period", selection: $goalPeriodRaw) {
+            ForEach(GoalPeriod.allCases) { period in
+                Text(period.title).tag(period.rawValue)
+            }
+        }
+        .pickerStyle(.segmented)
+        return Group {
+            if isPad {
+                picker
+                    .controlSize(.large)
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+            } else {
+                picker
+            }
+        }
     }
 }
 
@@ -1080,6 +1102,10 @@ struct InfoPopoutCard: View {
     let theme: AnimalCharacter
     private var isPad: Bool { AppLayout.isPad }
 
+    private static func headerPointSize(isPad: Bool) -> CGFloat { isPad ? 18 : 11 }
+    private static func messagePointSize(isPad: Bool) -> CGFloat { isPad ? 28 : 16 }
+    private static func horizontalInset(isPad: Bool) -> CGFloat { isPad ? 24 : 14 }
+
     /// Width needed for the header or message, including the card's horizontal
     /// padding. Longer messages deliberately use the narrowest width that still
     /// fits them on two lines, instead of making the pop-out screen-wide.
@@ -1088,8 +1114,8 @@ struct InfoPopoutCard: View {
                                isPad: Bool,
                                maximum: CGFloat) -> CGFloat {
 #if canImport(UIKit)
-        let headerFont = UIFont.systemFont(ofSize: isPad ? 14 : 11, weight: .heavy)
-        let messageFont = UIFont.systemFont(ofSize: isPad ? 21 : 16, weight: .bold)
+        let headerFont = UIFont.systemFont(ofSize: headerPointSize(isPad: isPad), weight: .heavy)
+        let messageFont = UIFont.systemFont(ofSize: messagePointSize(isPad: isPad), weight: .bold)
         // `Text(header)` adds 0.6 points between every pair of letters below.
         // Include that tracking here too, or a heading can be measured a little
         // too narrowly and wrap even when the pop-out has room to grow.
@@ -1100,7 +1126,7 @@ struct InfoPopoutCard: View {
         let messageString = message as NSString
         let messageWidth = messageString
             .size(withAttributes: [.font: messageFont]).width
-        let horizontalPadding: CGFloat = isPad ? 36 : 28
+        let horizontalPadding = horizontalInset(isPad: isPad) * 2
         let maximumContentWidth = max(1, maximum - horizontalPadding)
 
         // Keep short explanations on one line. For longer translations, find
@@ -1110,7 +1136,7 @@ struct InfoPopoutCard: View {
             return ceil(max(headerWidth, messageWidth) + horizontalPadding)
         }
 
-        var lowerBound = min(maximumContentWidth, max(headerWidth, isPad ? 220 : 170))
+        var lowerBound = min(maximumContentWidth, max(headerWidth, isPad ? 280 : 170))
         var upperBound = maximumContentWidth
         let twoLineHeight = messageFont.lineHeight * 2.05
 
@@ -1131,7 +1157,7 @@ struct InfoPopoutCard: View {
 
         return ceil(upperBound + horizontalPadding)
 #else
-        return min(isPad ? 340 : 250, maximum)
+        return min(isPad ? 480 : 250, maximum)
 #endif
     }
 
@@ -1139,28 +1165,28 @@ struct InfoPopoutCard: View {
         VStack(spacing: 0) {
             Triangle()
                 .fill(.white)
-                .frame(width: 18, height: 9)
+                .frame(width: isPad ? 24 : 18, height: isPad ? 12 : 9)
                 .overlay(alignment: .bottom) {
                     // Hide the seam where the caret meets the card body.
                     Rectangle().fill(.white).frame(height: 1).padding(.horizontal, 2)
                 }
                 .offset(x: caretOffset)
 
-            VStack(alignment: .leading, spacing: isPad ? 5 : 3) {
+            VStack(alignment: .leading, spacing: isPad ? 8 : 3) {
                 Text(header.uppercased())
-                    .font(.system(size: isPad ? 14 : 11, weight: .heavy))
+                    .font(.system(size: Self.headerPointSize(isPad: isPad), weight: .heavy))
                     .tracking(0.6)
                     .foregroundStyle(theme.deepColor.opacity(0.55))
                 Text(message)
-                    .font(.system(size: isPad ? 21 : 16, weight: .bold))
+                    .font(.system(size: Self.messagePointSize(isPad: isPad), weight: .bold))
                     .foregroundStyle(theme.deepColor)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, isPad ? 18 : 14)
-            .padding(.vertical, isPad ? 14 : 11)
-            .background(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .padding(.horizontal, Self.horizontalInset(isPad: isPad))
+            .padding(.vertical, isPad ? 20 : 11)
+            .background(.white, in: RoundedRectangle(cornerRadius: isPad ? 20 : 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: isPad ? 20 : 16, style: .continuous)
                 .stroke(theme.deepColor.opacity(0.18), lineWidth: 1))
         }
         .shadow(color: theme.deepColor.opacity(0.22), radius: 14, y: 6)

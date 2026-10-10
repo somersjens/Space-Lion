@@ -17,19 +17,47 @@ import UIKit
 /// offers, so the hero, the offer and the whole cast fit on one screen instead
 /// of pushing the buy button below the fold. The base numbers are tuned for an
 /// iPhone in landscape; `unit` stretches them for the taller iPads.
+///
+/// Height alone is not enough on iPad. A page sheet there is narrower than the
+/// landscape screen, and a unit taken only from the height sizes the animal
+/// row past the sheet. The outer tiles were then clipped on both sides. The
+/// unit is therefore also capped so one row of the cast fits the width the
+/// sheet actually gives this view.
 private struct PremiumMetrics {
     let unit: CGFloat
 
-    init(height: CGFloat, isPad: Bool) {
+    /// Unit-1 sizes. `characterTile` pads each tile by `tilePad * 0.7` on both
+    /// sides, and the artwork is wider than the badge, so that sum is the
+    /// tile's minimum breadth.
+    private enum Base {
+        static let cardPad: CGFloat = 13
+        static let stripPad: CGFloat = 8
+        static let tileSpacing: CGFloat = 5
+        static let tileArt: CGFloat = 42
+        static let tilePad: CGFloat = 6
+        static var tileBreadth: CGFloat { tileArt + tilePad * 1.4 }
+    }
+
+    init(height: CGFloat, contentWidth: CGFloat, castColumns: Int, isPad: Bool) {
         let designHeight: CGFloat = isPad ? 515 : 455
-        let raw = height / designHeight
-        unit = min(isPad ? 1.75 : 1.2, max(0.72, raw))
+        let fromHeight = min(isPad ? 1.75 : 1.2, max(0.72, height / max(designHeight, 1)))
+        let columns = CGFloat(max(castColumns, 1))
+        let needed = Base.cardPad * 2
+            + Base.stripPad * 2
+            + Base.tileSpacing * (columns - 1)
+            + columns * Base.tileBreadth
+        let budget = contentWidth - 8
+        if needed > budget, budget > 1 {
+            unit = max(0.58, fromHeight * (budget / needed))
+        } else {
+            unit = fromHeight
+        }
     }
 
     private func s(_ value: CGFloat) -> CGFloat { value * unit }
 
     // Frame
-    var cardPadding: CGFloat { s(13) }
+    var cardPadding: CGFloat { s(Base.cardPad) }
     var stackSpacing: CGFloat { s(11) }
     var columnSpacing: CGFloat { s(14) }
 
@@ -52,10 +80,10 @@ private struct PremiumMetrics {
     var footnote: CGFloat { s(12) }
 
     // Character strip
-    var stripPadding: CGFloat { s(8) }
-    var tileSpacing: CGFloat { s(5) }
-    var tileArt: CGFloat { s(42) }
-    var tilePadding: CGFloat { s(6) }
+    var stripPadding: CGFloat { s(Base.stripPad) }
+    var tileSpacing: CGFloat { s(Base.tileSpacing) }
+    var tileArt: CGFloat { s(Base.tileArt) }
+    var tilePadding: CGFloat { s(Base.tilePad) }
     var tileBadge: CGFloat { s(10.5) }
 }
 
@@ -83,6 +111,10 @@ struct PremiumView: View {
     @State private var activeUnlockCharacterID: String?
     @State private var pendingUnlockCharacterIDs: [String] = []
     @State private var unlockCelebrationGeneration = 0
+    /// Width actually visible inside the sheet. The layout proposal can be the
+    /// full window while the sheet card is narrower, which is what clipped the
+    /// outer animals. Zero until the sheet has reported its real clip.
+    @State private var clippedWidth: CGFloat = 0
 
     init(initialCharacterID: String? = nil,
          celebratedUnlockCharacterID: String? = nil) {
@@ -103,12 +135,19 @@ struct PremiumView: View {
             SpaceMenuBackground(accent: character.color)
 
             GeometryReader { proxy in
+                let container = clippedWidth > 1
+                    ? min(proxy.size.width, clippedWidth)
+                    : proxy.size.width
                 let available = min(AppLayout.landscapeContentWidth,
-                                    proxy.size.width - AppLayout.landscapeGutter * 2)
+                                    max(0, container - AppLayout.landscapeGutter * 2))
                 // Side-by-side only when there is genuinely room for two
                 // columns; portrait stacks the hero above the offer.
                 let isSplit = available >= 620
-                let metrics = PremiumMetrics(height: proxy.size.height, isPad: isPad)
+                let castColumns = isSplit ? CharacterCatalog.all.count : 5
+                let metrics = PremiumMetrics(height: proxy.size.height,
+                                             contentWidth: available,
+                                             castColumns: castColumns,
+                                             isPad: isPad)
 
                 ScrollView {
                     VStack(spacing: metrics.stackSpacing) {
@@ -126,8 +165,7 @@ struct PremiumView: View {
                             offerPanel(metrics)
                         }
 
-                        characterStrip(metrics,
-                                       columns: isSplit ? CharacterCatalog.all.count : 5)
+                        characterStrip(metrics, columns: castColumns)
                     }
                     .padding(metrics.cardPadding)
                     .spaceMenuPanel(accent: character.color,
@@ -141,6 +179,12 @@ struct PremiumView: View {
                 }
                 .scrollBounceBehavior(.basedOnSize)
                 .scrollIndicators(.visible)
+                .background {
+                    SheetClipWidthReader { width in
+                        guard width > 1, abs(width - clippedWidth) > 0.5 else { return }
+                        clippedWidth = width
+                    }
+                }
             }
 
             if showsUnlockCelebration, let unlockedCharacter {
@@ -199,13 +243,15 @@ struct PremiumView: View {
     }
 
     private var closeButton: some View {
-        Button { dismiss() } label: {
+        let side: CGFloat = isPad ? 68 : 38
+        let glyph: CGFloat = isPad ? 28 : 17
+        return Button { dismiss() } label: {
             Image(systemName: "xmark")
-                .font(.system(size: 17 * scale, weight: .bold))
+                .font(.system(size: glyph, weight: .bold))
                 .foregroundStyle(character.deepColor)
-                .frame(width: 38 * scale, height: 38 * scale)
+                .frame(width: side, height: side)
                 .background(.white.opacity(0.7), in: Circle())
-                .overlay(Circle().stroke(character.color.opacity(0.42), lineWidth: 1.25))
+                .overlay(Circle().stroke(character.color.opacity(0.42), lineWidth: isPad ? 1.75 : 1.25))
                 .shadow(color: character.deepColor.opacity(0.15), radius: 6, y: 3)
         }
     }
@@ -220,7 +266,7 @@ struct PremiumView: View {
                     Spacer()
                     LanguagePicker(
                         tint: character.deepColor.opacity(0.7),
-                        scale: isPad ? 1.12 : 0.8
+                        scale: isPad ? 1.85 : 0.8
                     )
                 } else {
                     Spacer()
@@ -833,10 +879,71 @@ private extension View {
     }
 }
 
+/// Reports the narrowest ancestor that actually crops this view. A page sheet
+/// can propose the full window and then mask a smaller card; sizing the cast
+/// to that card is what keeps the outer animals on screen.
+private struct SheetClipWidthReader: UIViewRepresentable {
+    var onWidth: (CGFloat) -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.onWidth = onWidth
+        DispatchQueue.main.async {
+            let width = Self.limitingWidth(of: view)
+            guard width > 1, abs(width - context.coordinator.last) > 0.5 else { return }
+            context.coordinator.last = width
+            context.coordinator.onWidth(width)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var onWidth: (CGFloat) -> Void = { _ in }
+        var last: CGFloat = 0
+    }
+
+    private static func limitingWidth(of view: UIView) -> CGFloat {
+        guard view.window != nil, view.bounds.width > 1 else { return 0 }
+        var limit = view.bounds.width
+        var current = view.superview
+        while let ancestor = current {
+            let crops = ancestor.clipsToBounds
+                || ancestor.layer.masksToBounds
+                || ancestor.layer.mask != nil
+            if crops {
+                let frame = ancestor.convert(ancestor.bounds, to: view)
+                let visible = frame.intersection(view.bounds)
+                if visible.width > 1 {
+                    limit = min(limit, visible.width)
+                }
+            }
+            current = ancestor.superview
+        }
+        return limit
+    }
+}
+
 extension View {
     @ViewBuilder
     func premiumSheetPresentation() -> some View {
-        if #available(iOS 18.0, *) {
+        if #available(iOS 18.0, *), AppLayout.isPad {
+            // `.page` is a portrait sheet of paper. On a landscape iPad that
+            // card is narrower than the screen, while this layout is measured
+            // against the full window, so the animal row was clipped on both
+            // sides. Ask for the landscape window instead; UIKit clamps it.
+            self
+                .gameEnvironment()
+                .presentationSizing(LandscapePremiumSizing())
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        } else if #available(iOS 18.0, *) {
             self
                 .gameEnvironment()
                 .presentationSizing(.page)
@@ -848,6 +955,16 @@ extension View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+    }
+}
+
+/// Landscape size for the Premium sheet. A page is portrait paper and clips
+/// this screen on a large iPad; the system still limits the result to the window.
+@available(iOS 18.0, *)
+private struct LandscapePremiumSizing: PresentationSizing, Sendable {
+    nonisolated func proposedSize(for root: PresentationSizingRoot,
+                                  context: PresentationSizingContext) -> ProposedViewSize {
+        ProposedViewSize(width: 1366, height: 1024)
     }
 }
 
