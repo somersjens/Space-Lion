@@ -129,6 +129,112 @@ private enum SpaceDestinationArt {
         if destination < firstWorlds.count { return firstWorlds[destination] }
         return "space_heaven_\(characterID)"
     }
+
+    static func image(named name: String) -> Image {
+#if canImport(UIKit)
+        if let prepared = LionPoseImageCache.shared.image(named: name) {
+            return Image(uiImage: prepared)
+        }
+#endif
+        return Image(name)
+    }
+
+    static func prepare(stage: Int, characterID: String) {
+#if canImport(UIKit)
+        LionPoseImageCache.shared.prepare(names: [name(stage: stage, characterID: characterID),
+                                                 name(stage: stage + 1, characterID: characterID)])
+#endif
+    }
+
+    /// Use the same crop in the settled scene and every arrival frame. This
+    /// prevents a last-frame jump, particularly in the almost-square iPad pane.
+    static func draw(in context: GraphicsContext, window: CGRect, stage: Int,
+                     characterID: String, zoom: CGFloat = 1, offset: CGSize = .zero) {
+        let art = context.resolve(image(named: name(stage: stage, characterID: characterID)))
+        let scale = max(window.width / art.size.width, window.height / art.size.height)
+        let size = CGSize(width: art.size.width * scale, height: art.size.height * scale)
+        let destination = (max(1, stage) - 1) % 5 + 1
+        let alignment: CGFloat = window.width / window.height < 1.25
+            ? (destination == 1 ? 0.35 : 1) : 0.5
+        let originX = window.minX - (size.width - window.width) * alignment
+        let rect = CGRect(x: window.midX + (originX - window.midX) * zoom + offset.width,
+                          y: window.midY - size.height * zoom / 2 + offset.height,
+                          width: size.width * zoom, height: size.height * zoom)
+        context.draw(art, in: rect)
+    }
+}
+
+/// Loose rock families share an orbit and speed. Depth is an immutable value:
+/// sorting once keeps every foreground silhouette in front of distant rocks,
+/// even while two families cross on screen.
+private enum SpaceAsteroidField {
+    private struct Family {
+        let x: CGFloat
+        let y: CGFloat
+        let depth: CGFloat
+    }
+    private struct Rock {
+        let family: Int
+        let offset: CGPoint
+        let radius: CGFloat
+        let depth: CGFloat
+        let rotation: Double
+        let asset: Int
+    }
+
+    private static let families = [
+        Family(x: 0.16, y: 0.24, depth: 0.22),
+        Family(x: 0.82, y: 0.28, depth: 0.52),
+        Family(x: 0.83, y: 0.80, depth: 0.70),
+        Family(x: 0.07, y: 0.78, depth: 0.91)
+    ]
+    private static let rocks: [Rock] = {
+        let radii: [[CGFloat]] = [[0.024, 0.016, 0.011], [0.069, 0.035, 0.024],
+                                  [0.082, 0.044, 0.025], [0.128, 0.065, 0.032]]
+        // Irregular spacing leaves small gaps between companions, rather than
+        // creating a stack of disconnected sharp and blurred silhouettes.
+        let offsets = [CGPoint(x: 0, y: 0), CGPoint(x: 0.083, y: -0.10),
+                       CGPoint(x: -0.056, y: 0.11)]
+        return families.indices.flatMap { family in
+            (0..<3).map { member in
+                Rock(family: family, offset: offsets[member], radius: radii[family][member],
+                     depth: families[family].depth + CGFloat(member - 1) * 0.025,
+                     rotation: Double(family * 3 + member) * 1.37,
+                     asset: (family + member) % SpaceDestinationArt.asteroids.count)
+            }
+        }.sorted { $0.depth < $1.depth }
+    }()
+
+    static func draw(in context: GraphicsContext, window: CGRect, time: TimeInterval) {
+        let art = SpaceDestinationArt.asteroids.map { context.resolve(SpaceDestinationArt.image(named: $0)) }
+        for rock in rocks {
+            let family = families[rock.family]
+            let speed = 0.0038 + family.depth * 0.0036
+            let travel = (family.x - CGFloat(time) * speed + 0.27) / 1.54
+            let phase = travel - floor(travel)
+            // The whole family wraps outside the pane together; companions
+            // never jump away from the main rock at a different boundary.
+            let x = window.minX + (phase * 1.54 - 0.27 + rock.offset.x) * window.width
+            let sway = CGFloat(sin(time * 0.045 + Double(rock.family) * 0.8)) * 0.016
+            let y = window.minY + (family.y + rock.offset.y + sway) * window.height
+            let radius = window.height * rock.radius
+            let distanceToFocus = abs(rock.depth - 0.54) / 0.46
+            // A continuous, gentle falloff preserves the surface detail in
+            // near rocks. There is no binary sharp/very-blurred depth switch.
+            // Focus depends on distance, not sprite size: small companions
+            // in the same family must not appear sharper just because they
+            // have a smaller silhouette.
+            let blur = min(1.35, window.height * 0.004) * pow(distanceToFocus, 1.6)
+            context.drawLayer { stone in
+                if blur > 0.04 { stone.addFilter(.blur(radius: blur)) }
+                stone.opacity *= Double(0.83 + rock.depth * 0.13)
+                stone.translateBy(x: x, y: y)
+                stone.rotate(by: .radians(rock.rotation + time * (0.005 + Double(rock.family) * 0.001)))
+                stone.draw(art[rock.asset], in: CGRect(x: -radius, y: -radius,
+                                                     width: radius * 2, height: radius * 2))
+            }
+        }
+    }
 }
 
 private struct SpaceAnswerBurstState: Identifiable {
@@ -164,6 +270,8 @@ struct SpaceLionPlayfield: View {
     let onDive: () -> Void
     let onFishEntranceComplete: () -> Void
     let onLevelCompletionFinished: () -> Void
+    /// Fixed frames for the debug preview; gameplay always uses the live clock.
+    var journeyPreviewProgress: CGFloat? = nil
 
     @State private var motionOffset = CGSize.zero
     @State private var completionOffset = CGSize.zero
@@ -185,11 +293,12 @@ struct SpaceLionPlayfield: View {
     @State private var buttonImpactScale: CGFloat = 1
     @State private var feedbackBurst: SpaceAnswerBurstState?
     @State private var actionSequence = 0
-    @State private var tutorialSequence = 0
     /// Extra spin layered on the travel pose. A correct answer makes the lion
     /// travel one and a quarter turns, deliberately ending away from upright.
     @State private var celebrationSpin = 0.0
     @State private var travelShakePhase: CGFloat = 0
+    @State private var displayedDestinationStage: Int?
+    @State private var journeyOriginStage: Int?
 
     /// Decode the selected poses, opening world and rock sprites while the
     /// menu is idle, before the gameplay animation needs them.
@@ -227,14 +336,20 @@ struct SpaceLionPlayfield: View {
                                  character: character,
                                  isPad: isPad,
                                  isRunning: runsAmbientMotion,
-                                 destinationStage: destinationStage,
+                                 destinationStage: displayedDestinationStage ?? initialDestinationStage,
+                                 isTravelling: isTravelling,
                                  feedbacks: cockpitFeedbacks)
 
                 if isTravelling {
                     SpaceForwardJourney(window: metrics.cockpit.windowRect,
+                                        previousStage: journeyOriginStage ?? max(1, destinationStage - 1),
                                         stage: destinationStage,
+                                        characterID: character.id,
+                                        isPad: isPad,
                                         journeyID: journeyID,
-                                        reduceMotion: reduceMotion)
+                                        reduceMotion: reduceMotion,
+                                        previewProgress: journeyPreviewProgress,
+                                        onArrival: { displayedDestinationStage = destinationStage })
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
@@ -248,6 +363,8 @@ struct SpaceLionPlayfield: View {
                                      centre: metrics.centre,
                                      size: metrics.answerSize,
                                      lionSize: metrics.lionSize)
+                            .opacity(isTravelling ? 0 : 1)
+                            .animation(.easeInOut(duration: 0.22), value: isTravelling)
                     }
                 }
 
@@ -291,13 +408,15 @@ struct SpaceLionPlayfield: View {
                         .allowsHitTesting(false)
                 }
             }
-            .modifier(SpaceShakeEffect(progress: travelShakePhase,
-                                       distance: reduceMotion ? 0 : (isPad ? 3.5 : 2.2)))
+            .modifier(SpaceJourneyShakeEffect(progress: travelShakePhase,
+                                              distance: reduceMotion ? 0 : (isPad ? 1.2 : 0.7)))
             .clipped()
             .contentShape(Rectangle())
             .onAppear {
+                displayedDestinationStage = initialDestinationStage
+                if isTravelling { journeyOriginStage = max(1, destinationStage - 1) }
+                SpaceDestinationArt.prepare(stage: destinationStage, characterID: character.id)
                 if playsFishEntrance { beginEntrance(metrics: metrics) }
-                progressTutorial(tutorial.step)
             }
             .onChange(of: playsFishEntrance) { _, value in
                 if value { beginEntrance(metrics: metrics) }
@@ -307,18 +426,29 @@ struct SpaceLionPlayfield: View {
             }
             .onChange(of: isTravelling) { _, value in
                 if value {
+                    journeyOriginStage = displayedDestinationStage ?? max(1, destinationStage - 1)
                     withAnimation(.linear(duration: GameConfig.stageTravelDuration)) {
-                        travelShakePhase += 5
+                        travelShakePhase = 1
                     }
                 } else {
                     travelShakePhase = 0
+                    displayedDestinationStage = destinationStage
+                    journeyOriginStage = nil
                 }
             }
-            .onChange(of: tutorial.step) { _, step in
-                progressTutorial(step)
+            .onChange(of: destinationStage) { _, stage in
+                if !isTravelling { displayedDestinationStage = stage }
+                SpaceDestinationArt.prepare(stage: stage, characterID: character.id)
             }
         }
         .ignoresSafeArea()
+    }
+
+    private var initialDestinationStage: Int {
+        if isTravelling, (journeyPreviewProgress ?? 0) < 0.68 {
+            return max(1, destinationStage - 1)
+        }
+        return destinationStage
     }
 
     private func answerButton(_ option: AnswerOption,
@@ -346,7 +476,7 @@ struct SpaceLionPlayfield: View {
         .buttonStyle(SpaceAnswerPressStyle())
         .hoverEffect(.highlight)
         .position(point)
-        .disabled(!isLive || isMoving || tutorial.isRunning || playsLevelCompletion)
+        .disabled(!isLive || isMoving || tutorial.blocksAnswers || playsLevelCompletion)
         .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [])
         .accessibilityLabel(Text(verbatim: option.text))
         .accessibilityHint(Text(verbatim: "Answer \(index + 1)"))
@@ -500,7 +630,7 @@ struct SpaceLionPlayfield: View {
                         at target: CGPoint,
                         from centre: CGPoint,
                         lionSize: CGFloat) {
-        guard isLive, !isMoving, !tutorial.isRunning, let round,
+        guard isLive, !isMoving, !tutorial.blocksAnswers, let round,
               round.options.contains(where: { $0.id == option.id }) else { return }
         actionSequence &+= 1
         let token = actionSequence
@@ -870,39 +1000,6 @@ struct SpaceLionPlayfield: View {
         }
     }
 
-    /// The inherited tutorial describes the old flight controls. Let its
-    /// existing cards advance as a short, non-blocking introduction while the
-    /// new tap controls remain self-evident.
-    private func progressTutorial(_ step: TutorialStep?) {
-        tutorialSequence &+= 1
-        let token = tutorialSequence
-        guard let step else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.48) {
-            guard tutorialSequence == token else { return }
-            switch step {
-            case .dragToFly:
-                onTutorialEvent(.draggedLow)
-                onTutorialEvent(.draggedHigh)
-            case .tapToFly:
-                onTutorialEvent(.tappedBelow)
-                onTutorialEvent(.tappedAbove)
-            case .diveUnder:
-                onTutorialEvent(.passedUnderSet)
-            case .correctHoop:
-                onTutorialEvent(.passedCorrectHoop(withTurbo: false))
-            case .turbo:
-                onTutorialEvent(.passedCorrectHoop(withTurbo: true))
-            case .wrongHoop:
-                onTutorialEvent(.passedCorrectHoop(withTurbo: false))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                    guard tutorialSequence == token else { return }
-                    onTutorialEvent(.passedCorrectHoop(withTurbo: false))
-                }
-            case .goodLuck:
-                break
-            }
-        }
-    }
 }
 
 extension SpaceLionPlayfield {
@@ -1391,6 +1488,23 @@ private struct SpaceShakeEffect: GeometryEffect {
     }
 }
 
+/// Ease vibration in and out inside the flight, so neither endpoint jolts.
+private struct SpaceJourneyShakeEffect: GeometryEffect {
+    var progress: CGFloat
+    let distance: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        let envelope = pow(sin(progress * .pi), 2)
+        let translation = sin(progress * .pi * 18) * envelope * distance
+        return ProjectionTransform(CGAffineTransform(translationX: translation, y: 0))
+    }
+}
+
 /// A lightweight GPU-friendly reward bloom. Correct answers throw stars and
 /// cool sparks; mistakes keep the same motion but use a soft encouraging amber.
 private struct SpaceAnswerBurst: View {
@@ -1511,89 +1625,200 @@ private struct SpaceViewportGlass: View {
     }
 }
 
-/// The short forward jump between two ten-question stages. Star points stretch
-/// radially from the vanishing point, a bright tunnel closes over the previous
-/// view, and then clears to reveal the new destination already waiting behind
-/// it. The whole cockpit receives a small synchronized vibration above.
+/// A clock-driven departure, cruise and arrival. Drawing explicit intermediate
+/// frames keeps Canvas animation reliable, even when the game clock is held.
 private struct SpaceForwardJourney: View {
     let window: CGRect
+    let previousStage: Int
     let stage: Int
+    let characterID: String
+    let isPad: Bool
     let journeyID: Int
     let reduceMotion: Bool
+    let previewProgress: CGFloat?
+    let onArrival: () -> Void
 
-    @State private var progress: CGFloat = 0
+    @State private var startedAt = Date()
+
+    private var arrivalColor: Color {
+        switch (max(1, stage) - 1) % 5 {
+        case 1: return Color(red: 1, green: 0.44, blue: 0.21)
+        case 2: return Color(red: 1, green: 0.77, blue: 0.38)
+        case 3: return Color(red: 0.52, green: 0.72, blue: 1)
+        case 4: return Color(red: 1, green: 0.85, blue: 0.55)
+        default: return Color(red: 0.76, green: 0.43, blue: 1)
+        }
+    }
+
+    private func ramp(_ value: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
+        let x = min(1, max(0, (value - start) / (end - start)))
+        return x * x * (3 - 2 * x)
+    }
 
     var body: some View {
-        let cut = min(window.width, window.height) * 0.11
-        Canvas { context, size in
-            let centre = CGPoint(x: size.width * 0.50, y: size.height * 0.46)
-            let fade = max(0, 1 - progress)
-            let tunnel = sin(Double(progress) * .pi)
-
-            context.fill(Path(CGRect(origin: .zero, size: size)),
-                         with: .radialGradient(Gradient(stops: [
-                            .init(color: .white.opacity(0.18 * tunnel), location: 0),
-                            .init(color: Color(red: 0.18, green: 0.64, blue: 1.00)
-                                .opacity(0.42 + 0.34 * tunnel), location: 0.24),
-                            .init(color: Color(red: 0.08, green: 0.02, blue: 0.25)
-                                .opacity(0.72 * fade + 0.18), location: 0.66),
-                            .init(color: .black.opacity(0.88 * fade), location: 1)
-                         ]), center: centre, startRadius: 0,
-                         endRadius: max(size.width, size.height) * 0.72))
-
-            var light = context
-            light.blendMode = .plusLighter
-            let maximumRadius = hypot(size.width, size.height) * 0.66
-            for index in 0..<58 {
-                let seed = CGFloat((index * 47 + journeyID * 31) % 101) / 101
-                let angle = Double(index) / 58 * .pi * 2 + Double(stage) * 0.37
-                let start = maximumRadius * (0.035 + seed * 0.30) * (0.4 + progress)
-                let length = maximumRadius * (0.08 + seed * 0.22) * (0.5 + progress * 1.8)
-                var streak = Path()
-                streak.move(to: CGPoint(x: centre.x + cos(angle) * start,
-                                         y: centre.y + sin(angle) * start * 0.58))
-                streak.addLine(to: CGPoint(x: centre.x + cos(angle) * (start + length),
-                                            y: centre.y + sin(angle) * (start + length) * 0.58))
-                let tint = index.isMultiple(of: 4)
-                    ? Color(red: 1.00, green: 0.72, blue: 0.34)
-                    : Color(red: 0.58, green: 0.90, blue: 1.00)
-                light.stroke(streak,
-                             with: .color(tint.opacity(0.30 + 0.60 * tunnel)),
-                             style: StrokeStyle(lineWidth: 0.8 + seed * 2.6,
-                                                lineCap: .round))
+        TimelineView(.animation(minimumInterval: SpaceAnimationBudget.characterInterval,
+                                paused: previewProgress != nil)) { timeline in
+            let progress = min(1, max(0, previewProgress ?? CGFloat(
+                timeline.date.timeIntervalSince(startedAt) / GameConfig.stageTravelDuration)))
+            let badgeOpacity = ramp(progress, from: 0.08, to: 0.22)
+                * (1 - ramp(progress, from: 0.76, to: 0.94))
+            Canvas { context, size in
+                let pane = CGRect(origin: .zero, size: size)
+                let cut = min(size.width, size.height) * 0.11
+                let inset: CGFloat = (isPad ? 26 : 18) * 0.82
+                context.clip(to: SpaceModuleShape(cut: max(2, cut - inset * 0.55))
+                    .path(in: pane.insetBy(dx: inset, dy: inset)))
+                drawFlight(in: context, pane: pane, progress: progress,
+                           sceneryTime: previewProgress == nil && !reduceMotion
+                               ? timeline.date.timeIntervalSinceReferenceDate : 0)
             }
-
-            let ringRadius = min(size.width, size.height) * (0.08 + progress * 0.48)
-            light.stroke(Path(ellipseIn: CGRect(x: centre.x - ringRadius,
-                                                y: centre.y - ringRadius * 0.58,
-                                                width: ringRadius * 2,
-                                                height: ringRadius * 1.16)),
-                         with: .color(.white.opacity(0.72 * fade)),
-                         lineWidth: reduceMotion ? 2 : 5)
-        }
-        .overlay(alignment: .top) {
-            HStack(spacing: 7) {
-                Image(systemName: "location.fill")
-                Text(verbatim: "\(stage)")
-                    .monospacedDigit()
+            .overlay(alignment: .top) {
+                HStack(spacing: isPad ? 12 : 8) {
+                    Text(verbatim: "\(previousStage)")
+                        .foregroundStyle(.white.opacity(0.7))
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: isPad ? 13 : 10, weight: .bold))
+                    Image(systemName: (stage - 1) % 5 == 4 ? "sparkles" : "globe")
+                    Text(verbatim: "\(stage)")
+                }
+                .font(.system(size: isPad ? 21 : 15, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(arrivalColor)
+                .padding(.horizontal, isPad ? 20 : 15)
+                .padding(.vertical, isPad ? 10 : 7)
+                .background(Color(red: 0.025, green: 0.04, blue: 0.10).opacity(0.82), in: Capsule())
+                .overlay(Capsule().stroke(arrivalColor.opacity(0.4), lineWidth: 1))
+                .padding(.top, window.height * 0.08)
+                .opacity(Double(badgeOpacity))
             }
-            .font(.system(size: window.height * 0.07, weight: .black, design: .rounded))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .background(.black.opacity(0.42), in: Capsule())
-            .padding(.top, window.height * 0.09)
-            .opacity(Double(sin(Double(progress) * .pi)))
+            .onChange(of: progress >= 0.68) { _, hasArrived in
+                if hasArrived { onArrival() }
+            }
+            .onAppear {
+                if progress >= 0.68 { onArrival() }
+            }
         }
         .frame(width: window.width, height: window.height)
-        .clipShape(SpaceModuleShape(cut: cut))
         .position(x: window.midX, y: window.midY)
-        .id(journeyID)
-        .onAppear {
-            progress = 0
-            withAnimation(.easeInOut(duration: reduceMotion ? 0.35 : GameConfig.stageTravelDuration)) {
-                progress = 1
+        .onAppear { startedAt = Date() }
+    }
+
+    private func drawFlight(in context: GraphicsContext, pane: CGRect, progress: CGFloat,
+                            sceneryTime: TimeInterval) {
+        let sceneryInset: CGFloat = (isPad ? 26 : 18) * 0.82
+        let sceneryPane = pane.insetBy(dx: sceneryInset, dy: sceneryInset)
+        if reduceMotion {
+            SpaceDestinationArt.draw(in: context, window: pane, stage: previousStage,
+                                     characterID: characterID)
+            if (previousStage - 1) % 5 != 4 {
+                SpaceAsteroidField.draw(in: context, window: sceneryPane, time: 0)
             }
+            var arrival = context
+            arrival.opacity = Double(ramp(progress, from: 0.12, to: 0.88))
+            SpaceDestinationArt.draw(in: arrival, window: pane, stage: stage,
+                                     characterID: characterID)
+            if (stage - 1) % 5 != 4 {
+                SpaceAsteroidField.draw(in: arrival, window: sceneryPane, time: 0)
+            }
+            return
+        }
+
+        let departure = ramp(progress, from: 0, to: 0.36)
+        let arrival = ramp(progress, from: 0.54, to: 0.97)
+        let tunnel = ramp(progress, from: 0.08, to: 0.34)
+            * (1 - ramp(progress, from: 0.57, to: 0.95))
+        let centre = CGPoint(x: pane.width * 0.51, y: pane.height * 0.44)
+        let reach = hypot(pane.width, pane.height) * 0.72
+
+        // An opaque space layer keeps the incoming world concealed until
+        // arrival. The old world stays visible during the initial acceleration.
+        context.fill(Path(pane), with: .color(Color(red: 0.008, green: 0.012, blue: 0.04)))
+        var outgoing = context
+        outgoing.opacity = Double(1 - ramp(progress, from: 0.14, to: 0.40))
+        SpaceDestinationArt.draw(in: outgoing, window: pane, stage: previousStage,
+                                 characterID: characterID, zoom: 1 + departure * 0.16,
+                                 offset: CGSize(width: -pane.width * departure * 0.025,
+                                                height: pane.height * departure * 0.015))
+        if (previousStage - 1) % 5 != 4 {
+            var departingRocks = outgoing
+            departingRocks.translateBy(x: centre.x - pane.width * departure * 0.025,
+                                       y: centre.y + pane.height * departure * 0.015)
+            departingRocks.scaleBy(x: 1 + departure * 0.32, y: 1 + departure * 0.32)
+            departingRocks.translateBy(x: -centre.x, y: -centre.y)
+            SpaceAsteroidField.draw(in: departingRocks, window: sceneryPane, time: sceneryTime)
+        }
+        var incoming = context
+        incoming.opacity = Double(arrival)
+        let settle = 1 - ramp(progress, from: 0.58, to: 0.98)
+        SpaceDestinationArt.draw(in: incoming, window: pane, stage: stage,
+                                 characterID: characterID, zoom: 1 + settle * 0.13,
+                                 offset: CGSize(width: pane.width * settle * 0.025, height: 0))
+        if (stage - 1) % 5 != 4 {
+            var arrivingRocks = context
+            arrivingRocks.opacity = Double(ramp(progress, from: 0.78, to: 0.98))
+            SpaceAsteroidField.draw(in: arrivingRocks, window: sceneryPane, time: sceneryTime)
+        }
+
+        guard tunnel > 0.001 else { return }
+        context.fill(Path(pane), with: .radialGradient(Gradient(stops: [
+            .init(color: Color(red: 0.74, green: 0.87, blue: 1).opacity(Double(tunnel) * 0.48), location: 0),
+            .init(color: Color(red: 0.20, green: 0.41, blue: 0.82).opacity(Double(tunnel) * 0.52), location: 0.10),
+            .init(color: arrivalColor.opacity(Double(tunnel) * 0.17), location: 0.37),
+            .init(color: Color(red: 0.015, green: 0.02, blue: 0.08).opacity(Double(tunnel) * 0.68), location: 1)
+        ]), center: centre, startRadius: 0, endRadius: reach))
+
+        var light = context
+        light.blendMode = .plusLighter
+        // Wisps create a curved volume around the star trails rather than a
+        // hard portal circle. Each expands continuously through the viewport.
+        for index in 0..<7 {
+            let phase = (CGFloat(index) / 7 + progress * 1.15)
+                .truncatingRemainder(dividingBy: 1)
+            let radius = reach * (0.055 + phase * phase * 0.92)
+            let visibility = sin(phase * .pi) * tunnel
+            let rect = CGRect(x: centre.x - radius, y: centre.y - radius * 0.63,
+                              width: radius * 2, height: radius * 1.26)
+            let start = Double(index) * 0.91 + Double(progress) * 0.55
+            var arc = Path()
+            arc.addRelativeArc(center: .zero, radius: 1, startAngle: .radians(start),
+                               delta: .radians(.pi * 1.12))
+            let transform = CGAffineTransform(a: rect.width / 2, b: 0, c: 0,
+                                              d: rect.height / 2, tx: centre.x, ty: centre.y)
+            let wisp = arc.applying(transform)
+            light.drawLayer { glow in
+                glow.addFilter(.blur(radius: pane.height * 0.017))
+                glow.stroke(wisp, with: .color(arrivalColor.opacity(Double(visibility) * 0.36)),
+                            lineWidth: pane.height * (0.008 + phase * 0.023))
+            }
+            light.stroke(wisp, with: .color(Color(red: 0.65, green: 0.84, blue: 1)
+                .opacity(Double(visibility) * 0.13)), lineWidth: 1 + phase * 2)
+        }
+
+        for index in 0..<76 {
+            let seed = CGFloat((index * 47 + journeyID * 13) % 103) / 103
+            let phase = (seed + progress * (1.15 + seed * 0.32))
+                .truncatingRemainder(dividingBy: 1)
+            let angle = Double(index) * 2.39996 + Double(journeyID) * 0.17
+            let radius = reach * (0.018 + phase * phase * 1.08)
+            let length = reach * (0.008 + phase * phase * 0.23) * tunnel
+            let startRadius = max(0, radius - length)
+            let bend = 0.015 * Double(phase)
+            let end = CGPoint(x: centre.x + cos(angle) * radius,
+                              y: centre.y + sin(angle) * radius * 0.63)
+            var trail = Path()
+            trail.move(to: CGPoint(x: centre.x + cos(angle - bend) * startRadius,
+                                   y: centre.y + sin(angle - bend) * startRadius * 0.63))
+            trail.addQuadCurve(to: end,
+                               control: CGPoint(x: centre.x + cos(angle - bend * 0.5) * (radius - length * 0.5),
+                                                y: centre.y + sin(angle - bend * 0.5) * (radius - length * 0.5) * 0.63))
+            let visibility = ramp(phase, from: 0, to: 0.16)
+                * (1 - ramp(phase, from: 0.78, to: 1)) * tunnel
+            let tint = index.isMultiple(of: 5) ? arrivalColor : Color(red: 0.63, green: 0.85, blue: 1)
+            light.stroke(trail, with: .linearGradient(
+                Gradient(colors: [tint.opacity(0), tint.opacity(Double(visibility) * 0.65),
+                                  .white.opacity(Double(visibility) * 0.85)]),
+                startPoint: trail.boundingRect.origin, endPoint: end),
+                style: StrokeStyle(lineWidth: 0.6 + phase * (isPad ? 2.1 : 1.4), lineCap: .round))
         }
     }
 }
@@ -1652,6 +1877,7 @@ private struct SpaceshipCockpit: View {
     let isPad: Bool
     let isRunning: Bool
     let destinationStage: Int
+    let isTravelling: Bool
     let feedbacks: [HoopFeedback]
 
     private let cyan = Color(red: 0.20, green: 0.82, blue: 1.00)
@@ -1818,10 +2044,11 @@ private struct SpaceshipCockpit: View {
         // Small glints and textured rocks move above the static destination
         // artwork; the full scene is never repainted by this animation clock.
         context.drawLayer { space in
+            space.opacity = isTravelling ? 0 : 1
             space.clip(to: chamfered(sceneryWindow, cut: sceneryCut))
             drawStars(in: space, window: sceneryWindow, time: time)
             if destination != 5 {
-                drawAsteroids(in: space, window: sceneryWindow, time: time)
+                SpaceAsteroidField.draw(in: space, window: sceneryWindow, time: time)
             }
             drawSpaceDust(in: space, window: sceneryWindow, time: time)
         }
@@ -2896,33 +3123,12 @@ private struct SpaceshipCockpit: View {
 
     // MARK: Windshield
 
-    private func artworkImage(named name: String) -> Image {
-#if canImport(UIKit)
-        if let prepared = LionPoseImageCache.shared.image(named: name) {
-            return Image(uiImage: prepared)
-        }
-#endif
-        return Image(name)
-    }
-
     private func drawSpace(in context: GraphicsContext, window: CGRect, cut: CGFloat, time: TimeInterval) {
         let glass = chamfered(window, cut: cut)
         context.drawLayer { space in
             space.clip(to: glass)
-            let asset = SpaceDestinationArt.name(stage: destinationStage, characterID: character.id)
-            let art = context.resolve(artworkImage(named: asset))
-            // Aspect-fill the authored scene instead of stretching the sphere.
-            // The same composition covers narrow phones and wider tablet panes.
-            let scale = max(window.width / art.size.width, window.height / art.size.height)
-            let imageSize = CGSize(width: art.size.width * scale, height: art.size.height * scale)
-            // Tablet panes are almost square. Keep the food world's right
-            // silhouette inside the pane; Earth's galaxy needs a leftward crop.
-            let alignment: CGFloat = window.width / window.height < 1.25
-                ? (destination == 1 ? 0.35 : 1.0) : 0.5
-            let imageRect = CGRect(x: window.minX - (imageSize.width - window.width) * alignment,
-                                   y: window.midY - imageSize.height / 2,
-                                   width: imageSize.width, height: imageSize.height)
-            space.draw(art, in: imageRect)
+            SpaceDestinationArt.draw(in: space, window: window, stage: destinationStage,
+                                     characterID: character.id)
 
             for (width, opacity) in [(3.0, 0.16), (2.0, 0.20), (1.4, 0.28)] as [(CGFloat, Double)] {
                 space.stroke(glass, with: .color(.black.opacity(opacity)), lineWidth: frameWidth * width)
@@ -2976,38 +3182,6 @@ private struct SpaceshipCockpit: View {
                                             center: CGPoint(x: x, y: y),
                                             startRadius: 0,
                                             endRadius: arm))
-        }
-    }
-
-    /// Each depth plane has its own parallax, scale, focus and drift speed.
-    /// Large blurred foreground stones pass the pane edges; sharp mid-distance
-    /// rocks show their crater texture without obscuring the character or sum.
-    private func drawAsteroids(in context: GraphicsContext, window: CGRect, time: TimeInterval) {
-        let samples: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
-            (0.02, 0.86, 0.17, 1.0), (0.94, 0.97, 0.16, 0.92),
-            (0.16, 0.39, 0.060, 0.55), (0.80, 0.20, 0.052, 0.48),
-            (0.30, 0.78, 0.036, 0.35), (0.92, 0.52, 0.042, 0.40),
-            (0.10, 0.16, 0.016, 0.18), (0.65, 0.12, 0.019, 0.22)
-        ]
-        for (index, sample) in samples.enumerated() {
-            let (baseX, baseY, size, depth) = sample
-            let direction: CGFloat = index.isMultiple(of: 2) ? 1 : -1
-            let drift = CGFloat(time) * (0.002 + depth * 0.005) * direction
-            // An overscan corridor allows rocks to leave before re-entering.
-            let x = window.minX + (wrap((baseX + drift + 0.18) / 1.36) * 1.36 - 0.18) * window.width
-            let y = window.minY + (baseY + CGFloat(sin(time * 0.09 + Double(index))) * 0.012) * window.height
-            let radius = window.height * size
-            let asset = SpaceDestinationArt.asteroids[index % SpaceDestinationArt.asteroids.count]
-            context.drawLayer { stone in
-                let blur = depth > 0.8 ? radius * 0.045 : (depth < 0.25 ? 0.65 : 0)
-                if blur > 0 { stone.addFilter(.blur(radius: blur)) }
-                stone.opacity = depth < 0.25 ? 0.72 : 0.96
-                stone.translateBy(x: x, y: y)
-                stone.rotate(by: .radians(Double(index) * 0.63 + time * 0.012 * Double(direction)))
-                stone.draw(context.resolve(artworkImage(named: asset)),
-                           in: CGRect(x: -radius, y: -radius,
-                                      width: radius * 2, height: radius * 2))
-            }
         }
     }
 

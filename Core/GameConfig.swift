@@ -55,8 +55,9 @@ public enum GameConfig {
         return questionsPerStage * secondsPerQuestionByStage[index]
     }
 
-    /// How long the forward flight between two destinations remains visible.
-    public static let stageTravelDuration = 2.35
+    /// Departure, cruise and decelerating arrival share this duration with the
+    /// game model, which holds input and the question clock until landing.
+    public static let stageTravelDuration = 3.2
 
     /// Defensive upper bound for generated questions and restored sessions.
     public static let maximumRoundCeiling = 10_000

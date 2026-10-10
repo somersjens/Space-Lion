@@ -1,17 +1,15 @@
 //
 //  Tutorial.swift
-//  Flying Penguin
+//  Space Lion
 //
-//  The guided first run teaches the seven things a flight is made of: dragging
-//  the penguin, tapping it to a height, diving under a set that holds no answer,
-//  flying through the right hoop, tapping that hoop early for turbo, what a
-//  wrong hoop costs — and that the life it costs comes straight back.
+//  The guided first run teaches the cockpit: match the question, read the time
+//  allowed per question, read the green and yellow pace dots, and read how many
+//  rounds this level contains. The farewell then hands the ship over.
 //
-//  Nothing here re-implements a rule. The tutorial only decides *which* sets are
-//  offered while a step is being taught, *what* is being said about it, and what
-//  a mistake is allowed to cost during the lesson; the sum, the score and the
-//  lives come out of `MemoryGame` exactly as they do in a normal session, which
-//  is what makes the lesson true.
+//  Nothing here re-implements a rule. A step only decides what is highlighted,
+//  when answers are accepted, and when the stage clock waits. The sums, the
+//  dots and the round count come from the same session the player is about to
+//  fly, which is what makes the lesson true.
 //
 
 import SwiftUI
@@ -33,36 +31,83 @@ struct TutorialMessageIconFrameKey: PreferenceKey {
 
 // MARK: - Steps
 
-/// The seven taught beats of a guided run, in the order they are taught.
+/// The five taught beats of a guided run, in the order they are taught.
 enum TutorialStep: Int, Equatable, CaseIterable {
-    /// Hold the penguin and drag it up and down.
-    case dragToFly = 1
-    /// Tap above and below the penguin instead of dragging it.
-    case tapToFly
-    /// A set with no right answer in it: dive underneath the lot.
-    case diveUnder
-    /// One of the three hoops carries the answer. Fly through it.
-    case correctHoop
-    /// Tap that hoop before the cone for the doubled, accelerated approach.
-    case turbo
-    /// What a wrong hoop costs.
-    case wrongHoop
-    /// Handing the game over.
-    case goodLuck
+    /// The question is at the top. Tap the answer that matches.
+    case findMatch = 1
+    /// Each round holds ten questions. How many seconds does each one get?
+    case watchClock
+    /// Green is within the question allowance, yellow is slower. Prove it twice.
+    case paceDots
+    /// Harder levels contain more rounds. How many does this one have?
+    case countRounds
+    /// Handing the ship over.
+    case ready
 
     var messageKey: String { "tutorial.step\(rawValue)" }
 
     /// One glyph per lesson, so a step is recognisable before it is read.
     var symbolName: String {
         switch self {
-        case .dragToFly:   return "hand.draw.fill"
-        case .tapToFly:    return "hand.tap.fill"
-        case .diveUnder:   return "arrow.down.circle.fill"
-        case .correctHoop: return "checkmark.circle.fill"
-        case .turbo:       return "bolt.fill"
-        case .wrongHoop:   return "heart.slash.fill"
-        case .goodLuck:    return "play.circle.fill"
+        case .findMatch:   return "questionmark.circle.fill"
+        case .watchClock:  return "timer"
+        case .paceDots:    return "circle.grid.2x2.fill"
+        case .countRounds: return "flag.checkered"
+        case .ready:       return "paperplane.fill"
         }
+    }
+}
+
+/// One of the two quizzes. The correct value is the number the cockpit is
+/// highlighting, never a figure invented for the lesson.
+struct TutorialQuiz: Equatable {
+    enum Kind: Equatable {
+        case time
+        case rounds
+    }
+
+    var kind: Kind
+    var choices: [Int]
+    var correct: Int
+
+    func label(for value: Int) -> String {
+        switch kind {
+        case .time:   return "\(value)s"
+        case .rounds: return "\(value)"
+        }
+    }
+}
+
+/// A completed tutorial answer, shown back with the same colour the pace dots use.
+struct TutorialPaceSample: Equatable, Identifiable {
+    let index: Int
+    let seconds: Double
+    /// Within the question allowance. The cockpit paints that green; slower is yellow.
+    let isFast: Bool
+    var id: Int { index }
+}
+
+/// The warm stroke drawn around whichever instrument a step is talking about.
+enum TutorialFocus {
+    static let color = Color(red: 1.00, green: 0.90, blue: 0.28)
+    static let fast = Color(red: 0.20, green: 0.90, blue: 0.42)
+    static let steady = Color(red: 1.00, green: 0.78, blue: 0.08)
+}
+
+/// A soft pulse, so a highlight reads as "look here" without hiding the number.
+struct TutorialPulseModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(reduceMotion ? 1 : (dim ? 0.45 : 1))
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true)) {
+                    dim = true
+                }
+            }
     }
 }
 
@@ -105,38 +150,45 @@ struct TutorialPlan: Equatable {
     /// complete move on the next set: down, underneath, and back into the air.
     var demonstratesDive = false
 
-    var isRunning: Bool { step != nil }
+    /// The side buttons accept a tap. Quizzes and the farewell hold them.
+    var blocksAnswers = false
+    /// The stage clock and the question timer wait, so a quiz does not spend
+    /// the time the lesson is asking about.
+    var freezesPlay = false
+    var highlightsQuestion = false
+    var highlightsTimeAllowance = false
+    var highlightsPaceDots = false
+    var highlightsRoundCount = false
+    var quiz: TutorialQuiz?
+    var paceSamples: [TutorialPaceSample] = []
+    /// The two pace answers have landed and are being shown back.
+    var showsPaceReveal = false
 
-    /// The rules that belong to a step. `holdsForTurbo` is layered on top by the
-    /// director once the player has had their three free sets.
+    var isRunning: Bool { step != nil }
+    /// Quizzes and the pace reveal own the touch, so a tap cannot also hit a sum.
+    var capturesTouches: Bool { quiz != nil || showsPaceReveal }
+
+    /// The rules that belong to a step.
     static func plan(for step: TutorialStep?) -> TutorialPlan {
         var plan = TutorialPlan()
         plan.step = step
         switch step {
-        case .dragToFly:
-            plan.hidesHoops = true
-            plan.blocksDiving = true
-            plan.tracksDrag = true
-        case .tapToFly:
-            plan.hidesHoops = true
-            plan.blocksDiving = true
-            plan.tracksTaps = true
-        case .diveUnder:
-            plan.forcesNoCorrectAnswer = true
-            plan.preventsLifeLoss = true
-        case .correctHoop:
-            plan.forcesCorrectAnswer = true
-            plan.preventsLifeLoss = true
-        case .turbo:
-            plan.forcesCorrectAnswer = true
-            plan.putsAnswerOnTop = true
-            plan.preventsLifeLoss = true
-            plan.highlightsTurbo = true
-        case .wrongHoop:
-            plan.forcesCorrectAnswer = true
-            plan.marksWrongHoops = true
-            plan.preventsBypassLifeLoss = true
-        case .goodLuck, .none:
+        case .findMatch:
+            plan.highlightsQuestion = true
+        case .watchClock:
+            plan.blocksAnswers = true
+            plan.freezesPlay = true
+            plan.highlightsTimeAllowance = true
+        case .paceDots:
+            plan.highlightsPaceDots = true
+        case .countRounds:
+            plan.blocksAnswers = true
+            plan.freezesPlay = true
+            plan.highlightsRoundCount = true
+        case .ready:
+            plan.blocksAnswers = true
+            plan.freezesPlay = true
+        case .none:
             break
         }
         return plan
@@ -166,9 +218,8 @@ enum TutorialEvent: Equatable {
 
 // MARK: - Director
 
-/// The state machine behind a guided run. It holds no game state of its own: it
-/// is told what happened and answers two questions — what is on screen, and
-/// which rules are bent while this step is being taught.
+/// The state machine behind a guided run. It holds no sums of its own. The
+/// view model tells it which answer landed, and which quiz figure was tapped.
 @MainActor
 final class TutorialDirector {
     private(set) var plan = TutorialPlan()
@@ -180,39 +231,21 @@ final class TutorialDirector {
     /// its published properties in one place.
     var onChange: (() -> Void)?
 
-    /// How long a step's own reaction is given before the next message replaces
-    /// it: long enough to see that it worked, short enough not to wait.
-    private static let moveHandover = 0.55
-    /// A passage hands over inside its own feedback beat, deliberately before
-    /// the engine installs the next sum: the set that arrives next is still the
-    /// playing field's preview at that moment, so it can be re-tuned to the new
-    /// lesson's rules before it ever becomes the set being flown at.
-    private static let passHandover = 0.22
-    /// The broken heart flying to the lives meter and returning its life is the
-    /// point of step six; it gets enough time to land before the farewell.
-    private static let heartHandover = 0.95
+    /// How long a correct match is given before the next card replaces it.
+    private static let matchHandover = 0.55
+    /// How long the two pace times stay up before the rounds quiz, if the
+    /// player does not tap Continue.
+    private static let paceReveal = 4.2
     /// How long the closing message stays up.
-    private static let farewell = 3.5
-    /// Sets the player may let pass in the turbo step before it waits for them.
-    private static let turboFreeSets = 3
-    /// Height tapping is an optional refinement after dragging has already
-    /// proved the player can steer. Do not hold the rest of the tutorial here.
-    private static let tapLessonTimeout = 5.0
-    /// After two missed dive sets the next one becomes a visual demonstration,
-    /// so a child can never remain stuck on an action they have not understood.
-    private static let diveAttemptsBeforeDemonstration = 2
-    /// The life lesson offers two chances to notice and choose a wrong hoop.
-    /// After that, repeatedly taking the visibly safe answer no longer traps
-    /// the player in the tutorial.
-    private static let lifeLessonSafePassLimit = 2
+    private static let farewell = 3.6
+    /// Step 3 asks for two completed answers before it shows their times.
+    private static let paceAnswers = 2
 
-    private var draggedLow = false
-    private var draggedHigh = false
-    private var tappedBelow = false
-    private var tappedAbove = false
-    private var passedSetsInTurboStep = 0
-    private var missedDiveSets = 0
-    private var safePassesInLifeLesson = 0
+    /// Seconds the highlighted allowance actually grants. Stage 1 is 10.
+    private var secondsPerQuestion = GameConfig.secondsPerQuestionByStage[0]
+    /// Rounds in the level being taught. One round is ten questions.
+    private var roundCount = 1
+    private var paceSamples: [TutorialPaceSample] = []
     /// True between a step being satisfied and the next one arriving, so the
     /// step that is on its way out cannot be completed a second time.
     private var isAdvancing = false
@@ -220,16 +253,17 @@ final class TutorialDirector {
 
     // MARK: Lifecycle
 
+    /// The figures the quizzes have to agree with. Called before `begin`.
+    func prepare(secondsPerQuestion: Int, roundCount: Int) {
+        self.secondsPerQuestion = max(1, secondsPerQuestion)
+        self.roundCount = max(1, roundCount)
+    }
+
     func begin() {
         guard plan.step == nil else { return }
-        draggedLow = false
-        draggedHigh = false
-        tappedBelow = false
-        tappedAbove = false
-        passedSetsInTurboStep = 0
-        missedDiveSets = 0
-        safePassesInLifeLesson = 0
-        apply(.dragToFly)
+        paceSamples = []
+        isAdvancing = false
+        apply(.findMatch)
     }
 
     /// Ends the run without finishing it — the screen is going away, or the
@@ -238,112 +272,126 @@ final class TutorialDirector {
         stepWork?.cancel()
         stepWork = nil
         isAdvancing = false
+        paceSamples = []
         guard plan.step != nil else { return }
         plan = TutorialPlan()
         onChange?()
     }
 
+    /// Legacy flight events. The retired playfield still reports them; a Space
+    /// Lion lesson does not advance on a drag or a hoop.
+    func report(_: TutorialEvent) {}
+
     // MARK: What happened
 
-    func report(_ event: TutorialEvent) {
-        guard let step = plan.step, !isAdvancing else { return }
-
+    /// A correct answer in the live session. Wrong answers retry the sum and
+    /// do not count toward the pace lesson.
+    func noteCorrectAnswer(seconds: Double, isFast: Bool) {
+        guard let step = plan.step else { return }
         switch step {
-        case .dragToFly:
-            switch event {
-            case .draggedLow:  draggedLow = true
-            case .draggedHigh: draggedHigh = true
-            default: return
-            }
-            if draggedLow && draggedHigh {
-                advance(to: .tapToFly, after: Self.moveHandover)
-            }
-
-        case .tapToFly:
-            switch event {
-            case .tappedBelow: tappedBelow = true
-            case .tappedAbove: tappedAbove = true
-            default: return
-            }
-            if tappedBelow && tappedAbove {
-                advance(to: .diveUnder, after: Self.moveHandover)
-            }
-
-        case .diveUnder:
-            // Only going underneath the whole set teaches the lesson. A wrong
-            // hoop costs nothing here. After two missed sets, demonstrate the
-            // complete move on the next one instead of leaving the child stuck.
-            if event == .passedUnderSet {
-                advance(to: .correctHoop, after: Self.passHandover)
-            } else if event == .passedWrongHoop {
-                missedDiveSets += 1
-                if missedDiveSets >= Self.diveAttemptsBeforeDemonstration,
-                   !plan.demonstratesDive {
-                    plan.demonstratesDive = true
-                    onChange?()
+        case .findMatch:
+            guard !isAdvancing else { return }
+            plan.blocksAnswers = true
+            plan.freezesPlay = true
+            onChange?()
+            advance(to: .watchClock, after: Self.matchHandover)
+        case .paceDots:
+            guard !plan.showsPaceReveal, !plan.blocksAnswers else { return }
+            paceSamples.append(TutorialPaceSample(index: paceSamples.count,
+                                                  seconds: seconds,
+                                                  isFast: isFast))
+            plan.paceSamples = paceSamples
+            if paceSamples.count >= Self.paceAnswers {
+                plan.blocksAnswers = true
+                plan.freezesPlay = true
+                onChange?()
+                schedule(after: Self.matchHandover) { [weak self] in
+                    self?.showPaceReveal()
                 }
+            } else {
+                onChange?()
             }
-
-        case .correctHoop:
-            if case .passedCorrectHoop = event {
-                advance(to: .turbo, after: Self.passHandover)
-            }
-
-        case .turbo:
-            switch event {
-            case .passedCorrectHoop(let withTurbo) where withTurbo:
-                advance(to: .wrongHoop, after: Self.passHandover)
-            case .passedCorrectHoop, .passedUnderSet, .passedWrongHoop:
-                // Three sets to try it unaided; after that the next one waits.
-                passedSetsInTurboStep += 1
-                if passedSetsInTurboStep >= Self.turboFreeSets, !plan.holdsForTurbo {
-                    plan.holdsForTurbo = true
-                    onChange?()
-                }
-            default: break
-            }
-
-        case .wrongHoop:
-            switch event {
-            case .passedWrongHoop:
-                advance(to: .goodLuck, after: Self.heartHandover)
-            case .passedCorrectHoop, .passedUnderSet:
-                safePassesInLifeLesson += 1
-                if safePassesInLifeLesson >= Self.lifeLessonSafePassLimit {
-                    advance(to: .goodLuck, after: Self.passHandover)
-                }
-            default: break
-            }
-
-        case .goodLuck:
+        case .watchClock, .countRounds, .ready:
             break
         }
     }
 
+    /// A tap on one of the three quiz figures. A wrong figure stays on screen.
+    @discardableResult
+    func choose(_ value: Int) -> Bool {
+        guard let quiz = plan.quiz,
+              plan.step == .watchClock || plan.step == .countRounds else { return false }
+        if isAdvancing { return value == quiz.correct }
+        guard value == quiz.correct else { return false }
+        let next: TutorialStep = plan.step == .watchClock ? .paceDots : .ready
+        advance(to: next, after: 0.28)
+        return true
+    }
+
+    func continueAfterPaceReveal() {
+        guard plan.step == .paceDots, plan.showsPaceReveal, !isAdvancing else { return }
+        advance(to: .countRounds, after: 0.05)
+    }
+
     // MARK: Plumbing
+
+    private func showPaceReveal() {
+        guard plan.step == .paceDots, !isAdvancing else { return }
+        plan.showsPaceReveal = true
+        plan.blocksAnswers = true
+        plan.freezesPlay = true
+        plan.paceSamples = paceSamples
+        onChange?()
+        schedule(after: Self.paceReveal) { [weak self] in
+            guard let self, self.plan.showsPaceReveal, !self.isAdvancing else { return }
+            self.advance(to: .countRounds, after: 0)
+        }
+    }
 
     private func advance(to step: TutorialStep, after delay: Double) {
         isAdvancing = true
         schedule(after: delay) { [weak self] in
-            guard let self else { return }
-            self.apply(step)
-            guard step == .goodLuck else { return }
-            self.schedule(after: Self.farewell) { [weak self] in
-                self?.cancel()
-            }
+            self?.apply(step)
         }
     }
 
     private func apply(_ step: TutorialStep) {
         isAdvancing = false
-        plan = TutorialPlan.plan(for: step)
+        var next = TutorialPlan.plan(for: step)
+        switch step {
+        case .watchClock:
+            next.quiz = TutorialQuiz(kind: .time,
+                                     choices: Self.options(correct: secondsPerQuestion, delta: 5),
+                                     correct: secondsPerQuestion)
+        case .paceDots:
+            next.paceSamples = paceSamples
+        case .countRounds:
+            next.quiz = TutorialQuiz(kind: .rounds,
+                                     choices: Self.options(correct: roundCount, delta: 1),
+                                     correct: roundCount)
+        case .findMatch, .ready:
+            break
+        }
+        plan = next
         onChange?()
 
-        guard step == .tapToFly else { return }
-        schedule(after: Self.tapLessonTimeout) { [weak self] in
-            guard let self, self.plan.step == .tapToFly, !self.isAdvancing else { return }
-            self.advance(to: .diveUnder, after: 0)
+        guard step == .ready else { return }
+        schedule(after: Self.farewell) { [weak self] in
+            self?.cancel()
         }
+    }
+
+    /// Three different positive figures, one of them the cockpit's own number.
+    private static func options(correct: Int, delta: Int) -> [Int] {
+        var values = [correct]
+        let candidates = [correct - delta, correct + delta,
+                          correct - 1, correct + 1, correct + 2,
+                          1, 2, 3]
+        for candidate in candidates where candidate > 0 && !values.contains(candidate) {
+            values.append(candidate)
+            if values.count == 3 { break }
+        }
+        return values.shuffled()
     }
 
     private func schedule(after delay: Double, work: @escaping () -> Void) {
@@ -524,5 +572,167 @@ struct TutorialNoticeCard: View {
             .shadow(color: theme.deepColor.opacity(0.3), radius: 18, y: 8)
         }
         .transition(.opacity)
+    }
+}
+
+// MARK: - Cockpit coach
+
+/// The lesson card, the three quiz figures, and the pace replay. It sits on
+/// the deck, under the question, and only its buttons take a touch.
+struct TutorialCoach: View {
+    let plan: TutorialPlan
+    let text: String
+    let theme: AnimalCharacter
+    var isPad: Bool = AppLayout.isPad
+    let onChoose: (Int) -> Bool
+    let onContinue: () -> Void
+
+    @ObservedObject private var language = LanguageManager.shared
+    @State private var rejected: Int?
+    @State private var shake: CGFloat = 0
+
+    var body: some View {
+        VStack(spacing: isPad ? 12 : 8) {
+            message
+                .allowsHitTesting(false)
+
+            if let quiz = plan.quiz {
+                HStack(spacing: isPad ? 14 : 10) {
+                    ForEach(quiz.choices, id: \.self) { value in
+                        choice(value, in: quiz)
+                    }
+                }
+            }
+
+            if plan.showsPaceReveal, !plan.paceSamples.isEmpty {
+                HStack(spacing: isPad ? 22 : 16) {
+                    ForEach(plan.paceSamples) { sample in
+                        paceSample(sample)
+                    }
+                }
+                .allowsHitTesting(false)
+
+                Button(action: onContinue) {
+                    Text("common.continue")
+                        .font(.system(size: isPad ? 18 : 15, weight: .heavy, design: .rounded))
+                        .foregroundStyle(theme.deepColor)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, isPad ? 12 : 9)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("tutorial-pace-continue")
+            }
+        }
+        .padding(isPad ? 16 : 12)
+        .frame(maxWidth: isPad ? 640 : 420)
+        .background(.black.opacity(0.72),
+                    in: RoundedRectangle(cornerRadius: isPad ? 22 : 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: isPad ? 22 : 16, style: .continuous)
+                .stroke(theme.color.opacity(0.9), lineWidth: isPad ? 3 : 2)
+        }
+        .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
+        .onChange(of: plan.step) { _, _ in
+            rejected = nil
+            shake = 0
+        }
+    }
+
+    private var message: some View {
+        let parts = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        let title = String(parts.first ?? "")
+        let body = parts.count > 1 ? String(parts[1]) : ""
+        return VStack(alignment: .leading, spacing: isPad ? 6 : 4) {
+            HStack(alignment: .center, spacing: isPad ? 10 : 8) {
+                if let symbol = plan.step?.symbolName {
+                    Image(systemName: symbol)
+                        .font(.system(size: isPad ? 22 : 16, weight: .bold))
+                        .foregroundStyle(theme.color)
+                }
+                Text(verbatim: title)
+                    .font(.system(size: isPad ? 22 : 16, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if !body.isEmpty {
+                Text(verbatim: body)
+                    .font(.system(size: isPad ? 18 : 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func choice(_ value: Int, in quiz: TutorialQuiz) -> some View {
+        let isRejected = rejected == value
+        return Button {
+            if onChoose(value) {
+                rejected = nil
+            } else {
+                rejected = value
+                shake = 0
+                withAnimation(.linear(duration: 0.36)) { shake = 1 }
+            }
+        } label: {
+            Text(verbatim: quiz.label(for: value))
+                .font(.system(size: isPad ? 28 : 20, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(minWidth: isPad ? 96 : 72, minHeight: isPad ? 64 : 48)
+                .background(Color(red: 0.08, green: 0.12, blue: 0.28),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(isRejected
+                                ? Color(red: 1.00, green: 0.38, blue: 0.28)
+                                : theme.color,
+                                lineWidth: isPad ? 3 : 2.5)
+                }
+        }
+        .buttonStyle(.plain)
+        .modifier(TutorialChoiceShake(travel: isRejected ? shake : 0))
+        .accessibilityIdentifier("tutorial-choice-\(value)")
+    }
+
+    private func paceSample(_ sample: TutorialPaceSample) -> some View {
+        HStack(spacing: isPad ? 8 : 6) {
+            Circle()
+                .fill(sample.isFast ? TutorialFocus.fast : TutorialFocus.steady)
+                .frame(width: isPad ? 18 : 14, height: isPad ? 18 : 14)
+                .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 1))
+            Text(verbatim: paceLabel(sample.seconds))
+                .font(.system(size: isPad ? 22 : 16, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("tutorial-pace-\(sample.index)")
+    }
+
+    /// One decimal, in the language on screen, so 8.4 and 8,4 both read as time.
+    private func paceLabel(_ seconds: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = language.locale
+        formatter.minimumFractionDigits = 1
+        formatter.maximumFractionDigits = 1
+        let number = formatter.string(from: NSNumber(value: seconds)) ?? String(format: "%.1f", seconds)
+        return number + "s"
+    }
+}
+
+/// A short sideways shake for a quiz figure that is not the cockpit's number.
+private struct TutorialChoiceShake: GeometryEffect {
+    var travel: CGFloat
+    var animatableData: CGFloat {
+        get { travel }
+        set { travel = newValue }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        let offset = sin(travel * .pi * 4) * 7
+        return ProjectionTransform(CGAffineTransform(translationX: offset, y: 0))
     }
 }

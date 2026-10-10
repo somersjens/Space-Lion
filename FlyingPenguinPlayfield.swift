@@ -671,50 +671,7 @@ struct FlyingPenguinPlayfield: View {
     /// penguin, so up/down, tap-above/tap-below and the route under the hoops
     /// remain understandable even when the child does not read the copy.
     @ViewBuilder private var tutorialControlHint: some View {
-        if entranceStage >= 5, !completionActive {
-            switch tutorial.step {
-            case .dragToFly:
-                TutorialVerticalDragHint(size: penguinSize,
-                                         tint: character.deepColor,
-                                         reduceMotion: reduceMotion)
-                    .frame(width: penguinSize * 0.52, height: penguinSize * 1.72)
-                    .position(x: displayedPenguinX + penguinSize * 0.70,
-                              y: min(sceneSize.height - penguinSize * 0.88,
-                                     max(penguinSize * 0.88, displayedPenguinY)))
-                    .allowsHitTesting(false)
-
-            case .tapToFly:
-                TutorialHeightTapHint(penguin: CGPoint(x: displayedPenguinX,
-                                                       y: displayedPenguinY),
-                                      flightMaxY: flightMaxY,
-                                      size: penguinSize,
-                                      tint: character.deepColor,
-                                      reduceMotion: reduceMotion)
-                    .frame(width: sceneSize.width, height: sceneSize.height)
-                    .allowsHitTesting(false)
-
-            case .diveUnder:
-                TutorialDivePathHint(
-                    penguin: CGPoint(x: displayedPenguinX,
-                                     y: displayedPenguinY),
-                    start: CGPoint(x: displayedPenguinX + penguinSize * 0.38,
-                                   y: displayedPenguinY + penguinSize * 0.16),
-                    end: CGPoint(x: min(sceneSize.width * 0.62,
-                                       max(displayedPenguinX + penguinSize * 1.15,
-                                           hoopX - penguinSize * 0.72)),
-                                 y: waterline + penguinSize * 0.13),
-                    size: penguinSize,
-                    tint: character.deepColor,
-                    reduceMotion: reduceMotion
-                )
-                .frame(width: sceneSize.width, height: sceneSize.height)
-                .opacity(tutorialAutoDiveActive ? 0.38 : 1)
-                .allowsHitTesting(false)
-
-            default:
-                EmptyView()
-            }
-        }
+        EmptyView()
     }
 
     private var flightGesture: some Gesture {

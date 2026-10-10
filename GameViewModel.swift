@@ -118,26 +118,42 @@ final class GameViewModel: ObservableObject {
     /// Arms the guided run for the session about to start. Only meaningful
     /// before `begin()`: a run already in progress is never taken over.
     ///
-    /// The first step is applied here rather than at `begin()`, because the
-    /// cannon puts the first set of hoops on the conveyor while the penguin is
-    /// still in the barrel — and the lesson that opens the run is the one that
-    /// says there are no hoops yet. Nothing of it is visible this early: the
-    /// message card waits for the flight to settle.
+    /// The quizzes are built from this level's own allowance and round count,
+    /// so the highlighted cockpit figures and the answers are the same numbers.
     func armTutorial() {
         guard engine.state == .intro else { return }
+        director.prepare(secondsPerQuestion: secondsPerQuestion, roundCount: totalStages)
         director.begin()
     }
 
-    /// The playing field is the only place that knows how a passage actually
-    /// ended, so every lesson is driven from there.
+    /// The retired flight field still reports drag and hoop events. Space Lion
+    /// advances from answers and quiz taps instead.
     func reportTutorial(_ event: TutorialEvent) {
         guard director.isRunning else { return }
         director.report(event)
     }
 
+    /// A tap on a quiz figure. Wrong figures stay put; the right one moves on.
+    func confirmTutorialChoice(_ value: Int) -> Bool {
+        director.choose(value)
+    }
+
+    func continueTutorialReveal() {
+        director.continueAfterPaceReveal()
+    }
+
     private func syncTutorial() {
         set(\.tutorial, director.plan)
         set(\.isRescueHeartDue, engine.isRescueHeartDue && !director.isRunning)
+        guard !isPaused, sceneIsActive,
+              engine.state != .intro, engine.state != .gameOver else { return }
+        if director.plan.freezesPlay {
+            suspendQuestionTiming()
+            stopClock(rememberingRemaining: true)
+        } else {
+            startClockIfPossible()
+            resumeQuestionTimingIfPossible()
+        }
     }
 
     // MARK: - Life hearts
@@ -382,6 +398,10 @@ final class GameViewModel: ObservableObject {
         switch outcome {
         case .correct(_, let usedBonusFish):
             recordAnswerPace(elapsed: responseTime)
+            if director.isRunning {
+                director.noteCorrectAnswer(seconds: responseTime,
+                                           isFast: responseTime <= Double(secondsPerQuestion))
+            }
             let now = ProcessInfo.processInfo.systemUptime
             if let previous = lastCorrectCatchTime, now - previous <= 1 {
                 engine.awardFlyComboBonus()
@@ -557,7 +577,7 @@ final class GameViewModel: ObservableObject {
 
     private func startClockIfPossible() {
         guard clockSubscription == nil, sceneIsActive, !isPaused,
-              !isStageTransitioning,
+              !isStageTransitioning, !tutorial.freezesPlay,
               engine.state != .intro, engine.state != .gameOver,
               clockStoredSeconds > 0 else { return }
         clockDeadline = Date().addingTimeInterval(clockStoredSeconds)
@@ -691,6 +711,7 @@ final class GameViewModel: ObservableObject {
     private func resumeQuestionTimingIfPossible() {
         guard questionTimingStartedAt == nil,
               sceneIsActive, !isPaused, !isStageTransitioning,
+              !tutorial.freezesPlay,
               engine.state == .answering else { return }
         questionTimingStartedAt = ProcessInfo.processInfo.systemUptime
     }

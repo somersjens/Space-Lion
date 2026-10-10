@@ -245,18 +245,48 @@ enum AppLayout {
 private struct PlanetDesignPreview: View {
     let stage: Int
     let characterID: String
+    @State private var hasDeparted = false
+    @State private var isTravelling = false
+
+    private var playsJourney: Bool {
+        ProcessInfo.processInfo.arguments.contains("--planet-journey")
+    }
+
+    private var journeyProgress: CGFloat? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--planet-journey-frame"),
+              arguments.indices.contains(index + 1),
+              let value = Double(arguments[index + 1]), value.isFinite else { return nil }
+        return CGFloat(min(1, max(0, value)))
+    }
+
     var body: some View {
         GeometryReader { geometry in
+            let travelling = isTravelling || journeyProgress != nil
+            let destination = playsJourney && !hasDeparted ? max(1, stage - 1) : stage
+            let reducedMotion = !playsJourney && journeyProgress == nil
+                || ProcessInfo.processInfo.arguments.contains("--planet-reduce-motion")
             SpaceLionPlayfield(rounds: [], character: CharacterCatalog.character(id: characterID),
                                isPad: geometry.size.height > 600, isLive: false,
-                               isRunning: false, playsFishEntrance: false,
-                               playsLevelCompletion: false, destinationStage: stage,
-                               isTravelling: false, journeyID: 0, reduceMotion: true,
+                               isRunning: playsJourney, playsFishEntrance: false,
+                               playsLevelCompletion: false, destinationStage: destination,
+                               isTravelling: travelling, journeyID: 1, reduceMotion: reducedMotion,
                                topReserve: 0, bottomReserve: 0, leftReserve: 0, rightReserve: 0,
                                onHit: { _, _, _ in false }, onSwallow: { _ in }, onDive: {},
-                               onFishEntranceComplete: {}, onLevelCompletionFinished: {})
+                               onFishEntranceComplete: {}, onLevelCompletionFinished: {},
+                               journeyPreviewProgress: journeyProgress)
         }
         .ignoresSafeArea()
         .statusBarHidden()
+        .task {
+            guard playsJourney else { return }
+            do {
+                try await Task.sleep(for: .seconds(0.8))
+                hasDeparted = true
+                isTravelling = true
+                try await Task.sleep(for: .seconds(GameConfig.stageTravelDuration))
+                isTravelling = false
+            } catch { }
+        }
     }
 }

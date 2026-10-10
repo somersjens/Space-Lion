@@ -261,7 +261,7 @@ struct GameView: View {
                               // three are inert in a normal session, and the
                               // playing field costs nothing for them.
                               tutorial: model.tutorial,
-                              tutorialMessage: tutorialMessage,
+                              tutorialMessage: nil,
                               onTutorialEvent: handleTutorialEvent(_:),
                               onHit: { optionID, usesSpeedBonus, usesHalfLifePenalty in
                                   model.select(optionID: optionID,
@@ -291,6 +291,32 @@ struct GameView: View {
                                    isPad: isPad)
                         .padding(.top, topInset + (isPad ? 142 : 88))
                         .allowsHitTesting(false)
+                }
+
+                if showsTutorialCoach, let tutorialMessage {
+                    Color.clear
+                        .allowsHitTesting(false)
+                        .overlay(alignment: .bottom) {
+                            TutorialCoach(plan: model.tutorial,
+                                          text: tutorialMessage,
+                                          theme: character,
+                                          isPad: isPad,
+                                          onChoose: { value in
+                                              let accepted = model.confirmTutorialChoice(value)
+                                              if accepted { AppAudio.shared.playCorrect() }
+                                              else { AppAudio.shared.playWrongAnswer() }
+                                              return accepted
+                                          },
+                                          onContinue: {
+                                              AppAudio.shared.playMenuTap()
+                                              model.continueTutorialReveal()
+                                          })
+                                .padding(.horizontal, isPad ? 48 : 20)
+                                .padding(.bottom, max(screenInsets.bottom, 8) + (isPad ? 16 : 8))
+                                .allowsHitTesting(model.tutorial.capturesTouches)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        .zIndex(3)
                 }
 
                 if !showsIntro,
@@ -359,7 +385,10 @@ struct GameView: View {
     private var hud: some View {
         HStack(alignment: .center, spacing: isPad ? 12 : 7) {
             pauseButton
-            cockpitPanel(holographic: true, expands: true, height: hudHeight) {
+            cockpitPanel(holographic: true,
+                         expands: true,
+                         focused: model.tutorial.highlightsQuestion,
+                         height: hudHeight) {
                 questionReadout
             }
             timerCounter
@@ -471,14 +500,18 @@ struct GameView: View {
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
 
-                    Text(verbatim: L(key: "game.hud.secondsPerQuestion",
-                                    count: model.secondsPerQuestion))
-                    .font(.system(size: isPad ? 15 : 10,
-                                  weight: .bold,
-                                  design: .rounded))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
+                    focusedFigure(model.tutorial.highlightsTimeAllowance) {
+                        Text(verbatim: L(key: "game.hud.secondsPerQuestion",
+                                        count: model.secondsPerQuestion))
+                        .font(.system(size: isPad ? 15 : 10,
+                                      weight: .bold,
+                                      design: .rounded))
+                        .foregroundStyle(model.tutorial.highlightsTimeAllowance
+                                         ? .white
+                                         : .white.opacity(0.72))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                    }
                 }
                 .opacity(hudIsFilled ? 1 : 0)
                 .accessibilityHidden(!hudIsFilled)
@@ -492,17 +525,22 @@ struct GameView: View {
     private var scoreCounter: some View {
         cockpitPanel(height: hudHeight) {
             HStack(alignment: .center, spacing: isPad ? 12 : 6) {
-                Text(verbatim: "\(model.stageNumber)/\(model.totalStages)")
-                    .environment(\.layoutDirection, .leftToRight)
-                    .font(.system(size: isPad ? 34 : 21,
-                                  weight: .black,
-                                  design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .contentTransition(.numericText(value: Double(model.stageNumber)))
-                    .shadow(color: hudOrange.opacity(0.38), radius: isPad ? 5 : 3)
-                    .opacity(hudIsFilled ? 1 : 0)
+                HStack(spacing: 0) {
+                    Text(verbatim: "\(model.stageNumber)/")
+                    focusedFigure(model.tutorial.highlightsRoundCount) {
+                        Text(verbatim: "\(model.totalStages)")
+                    }
+                }
+                .environment(\.layoutDirection, .leftToRight)
+                .font(.system(size: isPad ? 34 : 21,
+                              weight: .black,
+                              design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .contentTransition(.numericText(value: Double(model.stageNumber)))
+                .shadow(color: hudOrange.opacity(0.38), radius: isPad ? 5 : 3)
+                .opacity(hudIsFilled ? 1 : 0)
 
                 Capsule()
                     .fill(hudCyan.opacity(0.36))
@@ -548,7 +586,37 @@ struct GameView: View {
         }
         .environment(\.layoutDirection, .leftToRight)
         .animation(.spring(response: 0.34, dampingFraction: 0.68), value: model.completedQuestions)
+        .overlay {
+            if model.tutorial.highlightsPaceDots {
+                RoundedRectangle(cornerRadius: isPad ? 10 : 7, style: .continuous)
+                    .stroke(TutorialFocus.color, lineWidth: isPad ? 2.5 : 1.8)
+                    .padding(isPad ? -6 : -4)
+                    .shadow(color: TutorialFocus.color.opacity(0.9), radius: isPad ? 6 : 4)
+                    .modifier(TutorialPulseModifier())
+                    .allowsHitTesting(false)
+            }
+        }
         .accessibilityHidden(true)
+    }
+
+    /// A glowing capsule behind the one figure the current step is asking about.
+    private func focusedFigure<Content: View>(
+        _ active: Bool,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .padding(.horizontal, active ? (isPad ? 8 : 5) : 0)
+            .padding(.vertical, active ? (isPad ? 3 : 1) : 0)
+            .background {
+                if active {
+                    Capsule()
+                        .fill(TutorialFocus.color.opacity(0.22))
+                        .overlay(Capsule().stroke(TutorialFocus.color, lineWidth: isPad ? 2.5 : 1.8))
+                        .shadow(color: TutorialFocus.color.opacity(0.95), radius: isPad ? 8 : 5)
+                        .modifier(TutorialPulseModifier())
+                        .allowsHitTesting(false)
+                }
+            }
     }
 
     private func answerDotGradient(for pace: AnswerPace?) -> LinearGradient {
@@ -617,6 +685,7 @@ struct GameView: View {
     private func cockpitPanel<Content: View>(
         holographic: Bool = false,
         expands: Bool = false,
+        focused: Bool = false,
         height: CGFloat,
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -660,6 +729,12 @@ struct GameView: View {
                     CockpitHUDShape(cut: cut)
                         .stroke(.white.opacity(0.22), lineWidth: 1)
                         .padding(isPad ? 6 : 4)
+                    if focused {
+                        CockpitHUDShape(cut: cut)
+                            .stroke(TutorialFocus.color, lineWidth: isPad ? 3.5 : 2.4)
+                            .shadow(color: TutorialFocus.color.opacity(0.95), radius: isPad ? 8 : 5)
+                            .modifier(TutorialPulseModifier())
+                    }
                     CockpitHUDSideAccents(cut: cut)
                         .stroke(hudOrange,
                                 style: StrokeStyle(lineWidth: isPad ? 5 : 3,
@@ -722,6 +797,12 @@ struct GameView: View {
     /// True once a round is on the instruments. The start card keeps the
     /// housings, but leaves them empty. Pause fills them again and blurs the sum.
     private var hudIsFilled: Bool { !showsIntro || showsPauseCard }
+
+    /// The coach waits until the lion has landed and a question is on the glass.
+    private var showsTutorialCoach: Bool {
+        model.tutorial.isRunning && !showsIntro && !playsFishEntrance
+            && !showsResult && !playsLevelCompletion && !model.isStageTransitioning
+    }
 
     private var showsInstrumentHUD: Bool {
         // The rail stays up for the start card and for pause. It steps aside
