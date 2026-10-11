@@ -439,9 +439,34 @@ enum LevelCardStatus: Equatable {
     case completed
 }
 
+/// A shared dark space base with illuminated accents in the character's hue.
+private struct CompletedLevelPalette {
+    static let midnight = Color(red: 0.035, green: 0.045, blue: 0.13)
+    static let indigo = Color(red: 0.12, green: 0.10, blue: 0.28)
+
+    let accent: Color
+    let light: Color
+    let highlight: Color
+    let sphere: Color
+
+    init(theme: AnimalCharacter) {
+        let rgb = theme.primaryRGB
+        func blend(toward target: (Double, Double, Double), amount: Double) -> Color {
+            Color(red: rgb.0 + (target.0 - rgb.0) * amount,
+                  green: rgb.1 + (target.1 - rgb.1) * amount,
+                  blue: rgb.2 + (target.2 - rgb.2) * amount)
+        }
+        accent = theme.color
+        // Lift the same hue for readable small text and bright ring highlights.
+        light = blend(toward: (1, 1, 1), amount: 0.30)
+        highlight = blend(toward: (1, 1, 1), amount: 0.55)
+        sphere = blend(toward: (0.035, 0.045, 0.13), amount: 0.66)
+    }
+}
+
 /// A level card: the big central number, the card score line, a three-dot
 /// progress indicator and the top-left tier badge. Reaching the completion
-/// score turns it into the gold "completed" card.
+/// score reveals a dark space card with two illuminated planets.
 struct LevelCardView: View {
     let level: MathLevel
     let status: LevelCardStatus
@@ -491,7 +516,7 @@ struct LevelCardView: View {
                 return Color(red: theme.deepRGB.0 * 0.76,
                              green: theme.deepRGB.1 * 0.76,
                              blue: theme.deepRGB.2 * 0.76)
-            case .maxed:  return Color(red: 0.30, green: 0.62, blue: 0.24)
+            case .maxed:  return CompletedLevelPalette(theme: theme).light
             }
         }
 
@@ -524,7 +549,7 @@ struct LevelCardView: View {
 
     /// During a return animation the score still starts at its old value. Keep
     /// every score-coloured detail in that old tier too; otherwise a maxed
-    /// bubble turns green before its number has actually reached the maximum.
+    /// bubble changes colour before its number reaches the maximum.
     private var displayedTier: Tier {
         guard isNewMaximumCelebration, !completionRevealed else { return tier }
         return tier(for: celebrationStart ?? best)
@@ -539,7 +564,7 @@ struct LevelCardView: View {
     }
 
     /// A level that crosses its maximum on this return stays in its ordinary
-    /// card until the bubbles have finished counting. Only then do the gold
+    /// card until the bubbles have finished counting. Only then do the space
     /// card, crown and planets arrive together.
     private var isNewMaximumCelebration: Bool {
         celebrationStartedAt != nil && (celebrationStart ?? best) < maximum && best >= maximum
@@ -570,8 +595,8 @@ struct LevelCardView: View {
                                          cornerRadius: 18 * cardScale,
                                          lineWidth: 4 * cardScale,
                                          glowRadius: 9 * cardScale,
-                                         strokeColor: theme.deepColor,
-                                         glowColor: theme.color)
+                                         strokeColor: showsCompletedAppearance ? completedPalette.metal : theme.deepColor,
+                                         glowColor: showsCompletedAppearance ? completedPalette.metal : theme.color)
                 }
             }
         }
@@ -772,42 +797,18 @@ struct LevelCardView: View {
 
     // MARK: Completed card
 
-    /// The completed card celebrates in two colours: a theme-specific `hero`
-    /// (number, score, dots and ribbon behind the crown) and a gold `metal`
-    /// (crown, border and glow). Each hero colour is deliberately dark enough
-    /// to stay crisp on the warm maximum-card background.
+    /// Inverted contrast: bright character-coloured accents on midnight blue.
+    private var completionColors: CompletedLevelPalette {
+        CompletedLevelPalette(theme: theme)
+    }
+
     private var completedPalette: (hero: Color, metal: Color) {
         Self.completedPalette(for: theme)
     }
 
     static func completedPalette(for theme: AnimalCharacter) -> (hero: Color, metal: Color) {
-        let gold = Color(red: 0.87, green: 0.66, blue: 0.12)
-        let hero: Color
-        switch theme.id {
-        case "flying_penguin":
-            hero = theme.deepColor
-        case "frog":
-            hero = Color(red: 0.40, green: 0.24, blue: 0.62)
-        case "bunny":
-            hero = Color(red: 0.47, green: 0.20, blue: 0.36)
-        case "dog":
-            hero = Color(red: 0.68, green: 0.25, blue: 0.16)
-        case "lion":
-            hero = Color(red: 0.18, green: 0.48, blue: 0.24)
-        case "octopus":
-            hero = Color(red: 0.08, green: 0.38, blue: 0.43)
-        case "crab":
-            hero = Color(red: 0.08, green: 0.30, blue: 0.55)
-        case "elephant":
-            hero = Color(red: 0.47, green: 0.23, blue: 0.34)
-        case "bear":
-            hero = Color(red: 0.08, green: 0.39, blue: 0.37)
-        case "fox":
-            hero = Color(red: 0.19, green: 0.27, blue: 0.58)
-        default:
-            hero = theme.deepColor
-        }
-        return (hero, gold)
+        let palette = CompletedLevelPalette(theme: theme)
+        return (palette.light, palette.accent)
     }
 
     private var completedCard: some View {
@@ -841,20 +842,6 @@ struct LevelCardView: View {
                         .scaleEffect(scorePulse ? 1.48 : 1)
                 }
                 .foregroundStyle(hero)
-                // The repeat marker is a superscript detail beside the score,
-                // not a second item in the centred layout. It appears from the
-                // second maximum onward; the first is marked by crown and gold.
-                .overlay(alignment: .topTrailing) {
-                    if maxCompletions >= 2 {
-                        maxCompletionBadge(fill: hero, metal: metal)
-                            // The wrapper is only an alignment column: the badge
-                            // keeps its natural width and grows to the right, so
-                            // a wider label ("MAX") never creeps back over the
-                            // number instead of staying pinned beside it.
-                            .frame(width: 23 * cardScale, alignment: .leading)
-                            .offset(x: 20 * cardScale, y: -7 * cardScale)
-                    }
-                }
                 Spacer(minLength: 2)
                 progressDots(active: 3, color: metal)
                     .padding(.bottom, 2)
@@ -862,43 +849,75 @@ struct LevelCardView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(8 * cardScale)
         }
-        .background(
-            LinearGradient(colors: [Color(red: 1.0, green: 0.96, blue: 0.85),
-                                    Color(red: 0.99, green: 0.90, blue: 0.68)],
-                           startPoint: .top, endPoint: .bottom),
-            in: RoundedRectangle(cornerRadius: 18 * cardScale)
-        )
+        .background { completedBackground }
+        .clipShape(RoundedRectangle(cornerRadius: 18 * cardScale))
         .overlay(
             RoundedRectangle(cornerRadius: 18 * cardScale)
-                .stroke(metal, lineWidth: 2.5 * cardScale)
+                .stroke(LinearGradient(colors: [hero.opacity(0.9),
+                                                metal.opacity(0.8),
+                                                metal.opacity(0.6)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing),
+                        lineWidth: 2 * cardScale)
         )
         .overlay {
-            completedPlanets(color: hero)
+            completedPlanets
+        }
+        .overlay(alignment: .topTrailing) {
+            // Keep repeat counts clear of the rings, including the wider MAX label.
+            if maxCompletions >= 2 {
+                maxCompletionBadge(fill: hero, metal: metal)
+                    .padding(10 * cardScale)
+            }
         }
         .overlay(alignment: .top) {
-            completedRibbon(fill: hero, crown: metal)
+            completedRibbon(fill: CompletedLevelPalette.indigo, crown: hero)
                 .offset(y: -9 * cardScale)
         }
-        .shadow(color: metal.opacity(0.35), radius: 6, y: 3)
+        .shadow(color: metal.opacity(0.22), radius: 8 * cardScale, y: 3)
+    }
+
+    private var completedBackground: some View {
+        let palette = completionColors
+        return ZStack {
+            LinearGradient(colors: [CompletedLevelPalette.indigo,
+                                    CompletedLevelPalette.midnight,
+                                    SpaceMenuPalette.horizon],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            RadialGradient(colors: [palette.accent.opacity(0.18), .clear],
+                           center: .topLeading, startRadius: 0, endRadius: cardHeight * 1.3)
+            Canvas { context, size in
+                // Fixed positions keep this quiet star field still during the reveal.
+                let stars: [CGPoint] = [CGPoint(x: 0.10, y: 0.23), CGPoint(x: 0.27, y: 0.12),
+                                        CGPoint(x: 0.82, y: 0.20), CGPoint(x: 0.92, y: 0.73),
+                                        CGPoint(x: 0.18, y: 0.82), CGPoint(x: 0.74, y: 0.87)]
+                for (index, star) in stars.enumerated() {
+                    let side = (index.isMultiple(of: 3) ? 1.6 : 1.0) * cardScale
+                    let rect = CGRect(x: size.width * star.x, y: size.height * star.y,
+                                      width: side, height: side)
+                    context.fill(Path(ellipseIn: rect), with: .color(palette.highlight.opacity(0.4)))
+                }
+            }
+        }
     }
 
     /// One ringed planet on each side of a maxed level, mirrored so the pair
     /// stays symmetrical. On a wide card they sit beside the number instead of
     /// against the border, and a little below centre so the crown above them
     /// does not pull the card top-heavy.
-    private func completedPlanets(color: Color) -> some View {
+    private var completedPlanets: some View {
         let side = 36 * 1.2 * cardScale
         // Two digits, plus a gap so the rings do not touch the numeral.
         let preferredLane = 54 * cardScale
+        let palette = completionColors
         return GeometryReader { proxy in
             let lane = min(preferredLane, max(0, proxy.size.width - side * 2))
             HStack(spacing: 0) {
-                CompletionPlanet(color: color, revealStartedAt: planetRevealStartedAt)
+                CompletionPlanet(palette: palette, revealStartedAt: planetRevealStartedAt)
                     .frame(width: side, height: side)
 
                 Color.clear.frame(width: lane)
 
-                CompletionPlanet(color: color, revealStartedAt: planetRevealStartedAt)
+                CompletionPlanet(palette: palette, revealStartedAt: planetRevealStartedAt)
                     .frame(width: side, height: side)
                     .scaleEffect(x: -1, y: 1)
             }
@@ -918,7 +937,7 @@ struct LevelCardView: View {
     }
 
     /// A small ribbon overlapping the top edge, carrying the crown. The ribbon
-    /// takes the hero colour and the crown the contrasting metal, so the badge
+    /// takes a dark fill and the crown a contrasting light colour, so the badge
     /// reads as an object sitting on the card rather than a floating glyph.
     private func completedRibbon(fill: Color, crown: Color) -> some View {
         Image(systemName: "crown.fill")
@@ -928,7 +947,7 @@ struct LevelCardView: View {
             .padding(.vertical, 4 * cardScale)
             .background(RoundedRectangle(cornerRadius: 6 * cardScale).fill(fill))
             .overlay(RoundedRectangle(cornerRadius: 6 * cardScale)
-                .stroke(.white.opacity(0.6), lineWidth: 1))
+                .stroke(completedPalette.metal.opacity(0.8), lineWidth: cardScale))
             .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
     }
 
@@ -940,13 +959,13 @@ struct LevelCardView: View {
         let cornerRadius = 3.5 * cardScale
         return Text(verbatim: label)
             .fixedSize()
-            .font(.system(size: 6.4 * cardScale, weight: .heavy, design: .rounded))
+            .font(.system(size: 8 * cardScale, weight: .heavy, design: .rounded))
             .foregroundStyle(fill)
             .lineLimit(1)
             .minimumScaleFactor(0.5)
             .padding(.horizontal, 2 * cardScale)
             .padding(.vertical, 1 * cardScale)
-            .background(.white.opacity(0.5),
+            .background(CompletedLevelPalette.indigo,
                         in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(metal.opacity(0.8), lineWidth: 1 * cardScale))
@@ -958,16 +977,12 @@ struct LevelCardView: View {
 /// mirrored. The far half of the ring is drawn behind the disc, so it does
 /// not cross the face.
 private struct CompletionPlanet: View {
-    let color: Color
+    let palette: CompletedLevelPalette
     /// Nil means this is an already-completed card and should render fully.
     let revealStartedAt: Date?
 
-    /// Matches the warm fill of the completed card, so the glint reads as a
-    /// highlight instead of a second theme colour.
-    private static let highlight = Color(red: 1.0, green: 0.96, blue: 0.85)
-
     /// Room around the disc for the tilted ring.
-    private static let frameFactor: CGFloat = 1.9
+    private static let frameFactor: CGFloat = 1.8
 
     /// The reveal lasts well under a second, after which the planet is still.
     /// Left running, the timeline would wake every completed card at full rate
@@ -991,7 +1006,6 @@ private struct CompletionPlanet: View {
                     .frame(width: proxy.size.width, height: proxy.size.height)
             }
         }
-        .shadow(color: .black.opacity(0.12), radius: 1, y: 0.5)
         .task(id: revealStartedAt) {
             guard let revealStartedAt else {
                 hasSettled = true
@@ -1012,15 +1026,27 @@ private struct CompletionPlanet: View {
         ZStack {
             ringHalf(diameter: diameter, front: false)
             Circle()
-                .fill(color)
-                .overlay(alignment: .topLeading) {
+                .fill(RadialGradient(colors: [palette.sphere,
+                                             CompletedLevelPalette.indigo,
+                                             CompletedLevelPalette.midnight],
+                                     center: .topLeading, startRadius: 0, endRadius: diameter))
+                .overlay {
                     Circle()
-                        .fill(Self.highlight)
-                        .frame(width: diameter * 0.28, height: diameter * 0.28)
-                        .offset(x: diameter * 0.16, y: diameter * 0.14)
+                        .stroke(LinearGradient(colors: [palette.light,
+                                                        palette.accent.opacity(0.7),
+                                                        palette.accent.opacity(0.4)],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                                lineWidth: max(0.8, diameter * 0.045))
                 }
-                .clipShape(Circle())
+                .overlay(alignment: .topLeading) {
+                    Ellipse()
+                        .fill(palette.highlight.opacity(0.9))
+                        .frame(width: diameter * 0.20, height: diameter * 0.10)
+                        .rotationEffect(.degrees(-40))
+                        .offset(x: diameter * 0.18, y: diameter * 0.18)
+                }
                 .frame(width: diameter, height: diameter)
+                .shadow(color: palette.accent.opacity(0.3), radius: diameter * 0.16)
             ringHalf(diameter: diameter, front: true)
         }
     }
@@ -1029,10 +1055,16 @@ private struct CompletionPlanet: View {
     /// the rear arc stays behind the planet instead of crossing its face.
     private func ringHalf(diameter: CGFloat, front: Bool) -> some View {
         RingArc(isFront: front)
-            .stroke(color, style: StrokeStyle(lineWidth: max(1.1, diameter * 0.10),
-                                              lineCap: .butt))
-            .frame(width: diameter * 1.55, height: diameter * 0.62)
-            .rotationEffect(.degrees(22))
+            .stroke(LinearGradient(colors: front
+                                    ? [palette.accent, palette.light, palette.accent]
+                                    : [palette.accent.opacity(0.65), palette.light.opacity(0.8)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    style: StrokeStyle(lineWidth: max(1.2, diameter * (front ? 0.075 : 0.055)),
+                                       lineCap: .round))
+            .frame(width: diameter * 1.7, height: diameter * 0.66)
+            .rotationEffect(.degrees(-28))
+            .shadow(color: palette.accent.opacity(front ? 0.32 : 0.12),
+                    radius: diameter * 0.08)
     }
 
     private func revealProgress(at elapsed: TimeInterval) -> CGFloat {

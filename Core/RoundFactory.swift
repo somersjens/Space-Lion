@@ -114,6 +114,9 @@ public final class RoundFactory {
     private func ensurePlanned(through last: Int) {
         let origin = sequenceOrigin ?? last
         if sequenceOrigin == nil { sequenceOrigin = origin }
+        if nextUnplannedRound == nil {
+            generator.alignOrderRoute(toRound: origin)
+        }
         var next = nextUnplannedRound ?? origin
         while next <= last {
             let stageEnd = ((next - 1) / GameConfig.questionsPerStage + 1)

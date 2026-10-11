@@ -68,6 +68,13 @@ public enum MathTopic: String, CaseIterable, Identifiable, Codable, Sendable {
     /// four combinations are separate exercises, not three orderings of one.
     public var usesSupermixGrid: Bool { self == .mixed }
 
+    /// Addition, subtraction and the tables each practise one operation, so
+    /// Order is a sequence of that operation. Fractions, percentages and
+    /// Supermix use the same buttons to change which kind of sum comes out.
+    public var hasSingleQuestionType: Bool {
+        modeOverride == nil && !usesSupermixGrid
+    }
+
     /// Fractions and Percentages do not order their sub-levels; the same three
     /// buttons change what kind of sum comes out. They therefore carry their
     /// own labels and pop-out copy. Every other topic keeps Order · Random ·
@@ -230,41 +237,40 @@ public enum MathScaling {
 
 // MARK: - The fixed Order route
 
-/// The predictable climbing route the Order button plays. It is computed
-/// straight from the session's step counter — no randomness at all — so the
-/// same level always walks the same path.
+/// The predictable route the Order button plays for a topic with one
+/// operation. It is computed straight from the session's step counter — no
+/// randomness at all — so the same level always walks the same path.
 ///
-/// Addition and subtraction run three groups of five sums (fifteen per lap)
-/// and then start over; the tables simply cycle ×1 … ×12.
+/// One stage is ten sums, stepping by the practised number. The next stage is
+/// that same block with every varying number one higher. Fractions and
+/// percentages do not use this cycle: their buttons change the kind of sum,
+/// not its order.
 public enum PracticeRoute {
-    public static let groupSize = 5
-    /// What each group of five adds to the starting point, so the second and
-    /// third lap are not a literal repeat of the first.
-    public static let groupShifts = [0, 1, 3]
+    /// One stage. The next stage is this many steps later, and one higher.
+    public static var lapLength: Int { GameConfig.questionsPerStage }
 
-    public static var lapLength: Int { groupSize * groupShifts.count }
+    /// 0 … 9 inside the current block of ten.
+    private static func place(_ step: Int) -> Int { step % lapLength }
 
-    private static func shift(_ step: Int) -> Int {
-        groupShifts[(step / groupSize) % groupShifts.count]
-    }
+    /// 0 on the first stage, 1 on the next, and so on.
+    private static func roundShift(_ step: Int) -> Int { step / lapLength }
 
-    private static func position(_ step: Int) -> Int { step % groupSize }
-
-    /// The other operand of `n + ?`. For n = 2 this walks 2+2 … 2+10, then
-    /// 2+3 … 2+11, then 2+5 … 2+13.
+    /// The varying operand of an addition. For n = 1 this is 1, 2, … 10, so
+    /// the sums read 1+1 … 1+10. For n = 2 this is 2, 4, … 20, so the sums
+    /// read 2+2 … 20+2. The next stage adds one to each of those operands.
     public static func additionOther(number n: Int, step: Int) -> Int {
-        n + shift(step) + position(step) * n
+        n * (place(step) + 1) + roundShift(step)
     }
 
-    /// The starting number of `? − n`. For n = 2 this walks 12−2 … 4−2, then
-    /// 13−2 … 5−2, then 15−2 … 7−2.
+    /// The starting number of `? − n`. For n = 2 this walks 22−2 … 4−2. The
+    /// next stage is 23−2 … 5−2.
     public static func subtractionStart(number n: Int, step: Int) -> Int {
-        max(n, 6 * n + shift(step) - position(step) * n)
+        n * (lapLength + 1 - place(step)) + roundShift(step)
     }
 
-    /// The multiplier of `t × ?`, cycling 1 … 12 forever.
+    /// The multiplier of `t × ?`, cycling 1 … 10 and then repeating.
     public static func tableMultiplier(step: Int) -> Int {
-        (step % 12) + 1
+        place(step) + 1
     }
 
     /// The whole a fraction or percentage question works with, taken from a
