@@ -1,0 +1,18 @@
+IOSurfaceClientSetSurfaceNotify failed e00002c7
+2026-10-11 08:53:26.481 Space Lion[22864:13823094] SPACE_AUDIO entrance_schedule_ms=0.03 io_buffer_ms=2.67 route_latency_ms=0.10
+2026-10-11 08:53:35.133 Space Lion[22864:13823094] SPACE_PERF phase=play callbacks=194 p95_ms=88.41 max_ms=133.33 missed_budgets=128
+2026-10-11 08:53:45.183 Space Lion[22864:13823094] SPACE_PERF phase=play callbacks=216 p95_ms=80.80 max_ms=253.79 missed_budgets=152
+2026-10-11 08:53:55.184 Space Lion[22864:13823094] SPACE_PERF phase=play callbacks=232 p95_ms=76.66 max_ms=111.99 missed_budgets=149
+2026-10-11 08:53:57.336 Space Lion[22864:13823094] SPACE_PERF phase=play callbacks=44 p95_ms=77.97 max_ms=100.00 missed_budgets=31
+2026-10-11 08:54:00.540 Space Lion[22864:13823094] SPACE_PERF phase=journey callbacks=159 p95_ms=33.34 max_ms=99.98 missed_budgets=16
+2026-10-11 08:54:10.549 Space Lion[22864:13823094] SPACE_PERF phase=play callbacks=223 p95_ms=79.25 max_ms=120.27 missed_budgets=146
+2026-10-11 08:54:20.587 Space Lion[22864:13823094] SPACE_PERF phase=play callbacks=222 p95_ms=78.50 max_ms=109.18 missed_budgets=151
+2026-10-11 08:54:27.923 Space Lion[22864:13823094] SPACE_PERF phase=play callbacks=162 p95_ms=77.69 max_ms=116.67 missed_budgets=117
+2026-10-11 08:54:29.289 Space Lion[22864:13823094] SPACE_PERF phase=play callbacks=42 p95_ms=57.35 max_ms=86.09 missed_budgets=24
+2026-10-11 08:54:39.300 Space Lion[22864:13823094] SPACE_PERF phase=paused callbacks=596 p95_ms=16.70 max_ms=32.06 missed_budgets=1
+2026-10-11 08:54:49.318 Space Lion[22864:13823094] SPACE_PERF phase=paused callbacks=601 p95_ms=16.69 max_ms=17.28 missed_budgets=0
+2026-10-11 08:54:59.334 Space Lion[22864:13823094] SPACE_PERF phase=paused callbacks=601 p95_ms=16.70 max_ms=17.18 missed_budgets=0
+2026-10-11 08:55:09.351 Space Lion[22864:13823094] SPACE_PERF phase=paused callbacks=601 p95_ms=16.69 max_ms=17.47 missed_budgets=0
+2026-10-11 08:55:19.367 Space Lion[22864:13823094] SPACE_PERF phase=paused callbacks=601 p95_ms=16.69 max_ms=17.48 missed_budgets=0
+2026-10-11 08:55:29.384 Space Lion[22864:13823094] SPACE_PERF phase=paused callbacks=601 p95_ms=16.70 max_ms=17.47 missed_budgets=0
+com.spacelion.performanceaudit: 22864

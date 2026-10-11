@@ -1,0 +1,46 @@
+import Foundation
+
+/// Compiled with the production director extracted by run_audits.sh.
+@main struct TutorialAudit {
+    @MainActor static func main() async {
+        let director = TutorialDirector()
+        director.prepare(secondsPerQuestion: 10, roundCount: 3)
+        director.begin()
+        precondition(director.step == .findMatch)
+        director.noteCorrectAnswer(seconds: 2, isFast: true)
+        director.setSuspended(true)
+        try! await Task.sleep(for: .milliseconds(650))
+        precondition(director.step == .findMatch && !director.plan.hatchesClosed)
+        director.setSuspended(false)
+        try! await Task.sleep(for: .milliseconds(700))
+        precondition(director.step == .watchClock && director.plan.hatchesClosed)
+        precondition(!director.choose(15))
+        precondition(director.choose(10))
+        try! await Task.sleep(for: .milliseconds(40))
+        precondition(director.step == .paceDots && !director.plan.blocksAnswers)
+        for seconds in [2.0, 6.0, 12.0] { director.noteCorrectAnswer(seconds: seconds, isFast: seconds <= 10) }
+        precondition(director.plan.paceSamples.count == 3)
+        director.setSuspended(true)
+        try! await Task.sleep(for: .milliseconds(2100))
+        precondition(director.step == .paceDots)
+        director.setSuspended(false)
+        try! await Task.sleep(for: .milliseconds(2200))
+        precondition(director.step == .countRounds && director.plan.quiz?.correct == 3)
+        precondition(director.choose(3))
+        try! await Task.sleep(for: .milliseconds(40))
+        precondition(director.step == .ready)
+        director.setSuspended(true)
+        try! await Task.sleep(for: .milliseconds(3800))
+        precondition(director.step == .ready)
+        director.cancel()
+        director.setSuspended(false)
+        director.begin()
+        try! await Task.sleep(for: .milliseconds(200))
+        precondition(director.step == .findMatch && !director.plan.hatchesClosed)
+        director.noteCorrectAnswer(seconds: 1, isFast: true)
+        director.cancel()
+        try! await Task.sleep(for: .milliseconds(650))
+        precondition(!director.isRunning && !director.plan.hatchesClosed)
+        print("PASS tutorial handovers, hatches, quiz choices, pace samples, pause/resume, cancellation")
+    }
+}

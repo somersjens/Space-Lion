@@ -1,0 +1,1 @@
+rounds=8100 invalid=0 adjacentRepeats=13 orderMismatches=790 elapsed=0.10220616665901616

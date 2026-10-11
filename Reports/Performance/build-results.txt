@@ -1,0 +1,5 @@
+Oorspronkelijke Release-build (simulator): BUILD SUCCEEDED
+Definitieve Debug-build (simulator): BUILD SUCCEEDED
+Definitieve Release-build (simulator, gewone productieconfiguratie): BUILD SUCCEEDED
+Geoptimaliseerde diagnosebuild (fysieke iPhone, aparte bundle-id): BUILD SUCCEEDED
+Geoptimaliseerde oorspronkelijke diagnosebuild (fysieke iPhone, aparte bundle-id): BUILD SUCCEEDED

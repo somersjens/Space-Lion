@@ -1,0 +1,13 @@
+Launched application with com.spacelion.performanceaudit bundle identifier.
+Waiting for the application to terminate…
+2026-10-11 08:59:13.708 Space Lion[15932:781724] SPACE_AUDIO entrance_schedule_ms=0.01 io_buffer_ms=5.00 route_latency_ms=12.37
+2026-10-11 08:59:13.714 Space Lion[15932:781724] SPACE_PERF phase=intro callbacks=26 p95_ms=37.88 max_ms=183.37 missed_budgets=2
+2026-10-11 08:59:23.727 Space Lion[15932:781724] SPACE_PERF phase=play callbacks=620 p95_ms=24.94 max_ms=36.13 missed_budgets=28
+2026-10-11 08:59:33.742 Space Lion[15932:781724] SPACE_PERF phase=play callbacks=610 p95_ms=23.31 max_ms=37.20 missed_budgets=25
+2026-10-11 08:59:43.153 Space Lion[15932:781724] SPACE_PERF phase=play callbacks=578 p95_ms=23.77 max_ms=37.13 missed_budgets=17
+2026-10-11 08:59:46.353 Space Lion[15932:781724] SPACE_PERF phase=journey callbacks=195 p95_ms=16.72 max_ms=25.88 missed_budgets=2
+2026-10-11 08:59:56.358 Space Lion[15932:781724] SPACE_PERF phase=play callbacks=603 p95_ms=24.53 max_ms=37.53 missed_budgets=32
+2026-10-11 09:00:06.359 Space Lion[15932:781724] SPACE_PERF phase=play callbacks=617 p95_ms=23.25 max_ms=32.18 missed_budgets=14
+2026-10-11 09:00:12.350 Space Lion[15932:781724] SPACE_PERF phase=play callbacks=371 p95_ms=22.88 max_ms=37.50 missed_budgets=10
+2026-10-11 09:00:13.428 Space Lion[15932:781724] SPACE_PERF phase=play callbacks=56 p95_ms=24.45 max_ms=34.83 missed_budgets=2
+App terminated due to signal 15.

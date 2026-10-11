@@ -1,0 +1,13 @@
+IOSurfaceClientSetSurfaceNotify failed e00002c7
+objc[20486]: Class UIAccessibilityLoaderWebShared is implemented in both /Library/Developer/CoreSimulator/Volumes/iOS_24A434/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebKit.axbundle/WebKit (0x111f54398) and /Library/Developer/CoreSimulator/Volumes/iOS_24A434/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebCore.axbundle/WebCore (0x112478310). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+2026-10-11 08:44:25.817 Space Lion[20486:13797291] SPACE_AUDIO entrance_schedule_ms=0.03 io_buffer_ms=2.67 route_latency_ms=0.10
+2026-10-11 08:44:34.468 Space Lion[20486:13797291] SPACE_PERF phase=play callbacks=206 p95_ms=72.01 max_ms=98.68 missed_budgets=125
+2026-10-11 08:44:44.500 Space Lion[20486:13797291] SPACE_PERF phase=play callbacks=232 p95_ms=77.90 max_ms=109.08 missed_budgets=138
+2026-10-11 08:44:54.519 Space Lion[20486:13797291] SPACE_PERF phase=play callbacks=233 p95_ms=77.50 max_ms=90.64 missed_budgets=146
+2026-10-11 08:44:56.125 Space Lion[20486:13797291] SPACE_PERF phase=play callbacks=35 p95_ms=83.33 max_ms=92.25 missed_budgets=20
+2026-10-11 08:44:59.316 Space Lion[20486:13797291] SPACE_PERF phase=journey callbacks=169 p95_ms=18.13 max_ms=100.00 missed_budgets=8
+2026-10-11 08:45:09.317 Space Lion[20486:13797291] SPACE_PERF phase=play callbacks=241 p95_ms=74.38 max_ms=91.30 missed_budgets=143
+2026-10-11 08:45:19.320 Space Lion[20486:13797291] SPACE_PERF phase=play callbacks=241 p95_ms=67.40 max_ms=90.47 missed_budgets=148
+2026-10-11 08:45:26.674 Space Lion[20486:13797291] SPACE_PERF phase=play callbacks=169 p95_ms=75.69 max_ms=99.91 missed_budgets=106
+2026-10-11 08:45:28.020 Space Lion[20486:13797291] SPACE_PERF phase=play callbacks=43 p95_ms=48.56 max_ms=60.99 missed_budgets=21
+2026-10-11 08:45:38.034 Space Lion[20486:13797291] SPACE_PERF phase=paused callbacks=599 p95_ms=16.68 max_ms=17.39 missed_budgets=0

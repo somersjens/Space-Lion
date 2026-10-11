@@ -1,0 +1,11 @@
+Launched application with com.spacelion.performancebaseline bundle identifier.
+Waiting for the application to terminate…
+2026-10-11 09:02:24.756 Space Lion[16004:785809] SPACE_PERF callbacks=539 p95_ms=32.51 max_ms=455.60 missed_budgets=58
+2026-10-11 09:02:34.771 Space Lion[16004:785809] SPACE_PERF callbacks=515 p95_ms=38.97 max_ms=51.80 missed_budgets=97
+2026-10-11 09:02:44.772 Space Lion[16004:785809] SPACE_PERF callbacks=599 p95_ms=25.04 max_ms=41.68 missed_budgets=37
+2026-10-11 09:02:54.781 Space Lion[16004:785809] SPACE_PERF callbacks=582 p95_ms=28.78 max_ms=46.21 missed_budgets=43
+2026-10-11 09:03:04.782 Space Lion[16004:785809] SPACE_PERF callbacks=605 p95_ms=22.28 max_ms=48.53 missed_budgets=28
+2026-10-11 09:03:14.794 Space Lion[16004:785809] SPACE_PERF callbacks=577 p95_ms=32.59 max_ms=43.44 missed_budgets=67
+2026-10-11 09:03:24.804 Space Lion[16004:785809] SPACE_PERF callbacks=602 p95_ms=16.72 max_ms=41.86 missed_budgets=2
+2026-10-11 09:03:34.806 Space Lion[16004:785809] SPACE_PERF callbacks=600 p95_ms=16.69 max_ms=26.07 missed_budgets=1
+App terminated due to signal 15.

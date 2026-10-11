@@ -1,0 +1,2 @@
+PASS rounds=400950 adjacent_repeats=0 plans=8019 prepare50_p95_ms=0.892 prepare50_max_ms=1.662 total_s=10.913
+PASS tutorial handovers, hatches, quiz choices, pace samples, pause/resume, cancellation

@@ -108,9 +108,19 @@ private enum LionMotionPhase: Equatable {
 
 /// Ambient layers share a pausable clock, so every reflection, rock and light
 /// resumes from its actual position instead of jumping to a new wall-clock phase.
-private struct SpaceSceneClock: Equatable {
+struct SpaceSceneClock: Equatable {
     private var stored: TimeInterval = 0
     private var startedAt: Date?
+
+    init() {}
+
+    /// Pins scenery to one trailer frame. `ImageRenderer` samples this once,
+    /// so the stored time is the frame and the start date only absorbs the
+    /// few milliseconds spent drawing it.
+    init(trailerTime: TimeInterval, now: Date = Date()) {
+        stored = trailerTime
+        startedAt = now
+    }
 
     func time(at date: Date) -> TimeInterval {
         stored + (startedAt.map { max(0, date.timeIntervalSince($0)) } ?? 0)
@@ -457,6 +467,7 @@ struct SpaceLionPlayfield: View {
                                  feedbacks: cockpitFeedbacks,
                                  artworkRevision: artworkRevision)
                     .equatable()
+                    .zIndex(0)
 
                 if isTravelling {
                     SpaceForwardJourney(window: metrics.cockpit.windowRect,
@@ -470,7 +481,18 @@ struct SpaceLionPlayfield: View {
                                         onArrival: { displayedDestinationStage = destinationStage })
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
+                        .zIndex(1)
                 }
+
+                // The glass stays on the viewport. Answer stones sit in front of
+                // the window's dark outer rim for the whole flight, including
+                // the moment the destination canvas is replaced.
+                SpaceViewportGlass(window: metrics.cockpit.windowRect,
+                                   cut: min(metrics.cockpit.windowRect.width,
+                                            metrics.cockpit.windowRect.height) * 0.11,
+                                   isRunning: runsAmbientMotion,
+                                   sceneClock: sceneClock)
+                    .zIndex(1)
 
                 if let round {
                     let answers = Array(round.options.prefix(GameConfig.answerBubbleCount))
@@ -481,8 +503,7 @@ struct SpaceLionPlayfield: View {
                                      centre: metrics.centre,
                                      size: metrics.answerSize,
                                      lionSize: metrics.lionSize)
-                            .opacity(isTravelling ? 0 : 1)
-                            .animation(.easeInOut(duration: 0.22), value: isTravelling)
+                            .zIndex(2)
                     }
                 }
 
@@ -494,9 +515,11 @@ struct SpaceLionPlayfield: View {
                         .position(feedbackBurst.point)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
+                        .zIndex(3)
                 }
 
                 lion(metrics: metrics)
+                    .zIndex(3)
 
                 if playsLevelCompletion {
                     VictoryBloom(size: metrics.cockpit.windowRect.width * 0.55,
@@ -504,13 +527,8 @@ struct SpaceLionPlayfield: View {
                         .position(metrics.centre)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
+                        .zIndex(4)
                 }
-
-                SpaceViewportGlass(window: metrics.cockpit.windowRect,
-                                   cut: min(metrics.cockpit.windowRect.width,
-                                            metrics.cockpit.windowRect.height) * 0.11,
-                                   isRunning: runsAmbientMotion,
-                                   sceneClock: sceneClock)
 
                 if let tutorialMessage, tutorial.isRunning {
                     Text(tutorialMessage)
@@ -525,6 +543,7 @@ struct SpaceLionPlayfield: View {
                         .position(x: metrics.centre.x,
                                   y: metrics.size.height * 0.79)
                         .allowsHitTesting(false)
+                        .zIndex(5)
                 }
             }
             .modifier(SpaceJourneyShakeEffect(progress: travelShakePhase,
@@ -1295,7 +1314,7 @@ extension SpaceLionPlayfield {
                 + rows.map { CGPoint(x: rightX, y: $0) }
         }
 
-        fileprivate var cockpit: CockpitLayout {
+        var cockpit: CockpitLayout {
             let frameWidth: CGFloat = isPad ? 26 : 18
             // The rack ends at the mounting flange, rather than carrying an
             // extra strip of empty cabinet between the controls and glass.
@@ -1390,7 +1409,7 @@ private func cockpitWrap(_ value: Double) -> Double {
 
 /// Where the cockpit's fixed structure sits, so the painted bays line up
 /// exactly with the interactive buttons laid over them.
-private struct CockpitLayout: Equatable {
+struct CockpitLayout: Equatable {
     let windowRect: CGRect
     let ceilingJointY: CGFloat
     let floorTop: CGFloat
@@ -1403,7 +1422,7 @@ private struct CockpitLayout: Equatable {
 
 /// The interactive part of a wall control: a glossy answer cap sitting in the
 /// cockpit's recessed well. The shared cockpit canvas paints the lamp ring.
-private struct SpaceConsoleButton: View {
+struct SpaceConsoleButton: View {
     let text: String
     let size: CGFloat
     let accentColor: Color
@@ -1749,40 +1768,50 @@ private struct SpaceModuleShape: Shape {
 
 /// The glass in front of the viewport: a slow reflection and a soft inner
 /// vignette. It never accepts hits, so the answer buttons stay outside it.
-private struct SpaceViewportGlass: View {
+struct SpaceViewportGlass: View {
     let window: CGRect
     let cut: CGFloat
     let isRunning: Bool
     let sceneClock: SpaceSceneClock
+    /// Offline trailer frames supply their own clock. A live session leaves
+    /// this nil and keeps the slow reflection on the scenery timeline.
+    var frozenTime: TimeInterval? = nil
 
     var body: some View {
-        // A reflection crossing the glass is deliberately slow. Eight samples
-        // per second look continuous while avoiding a full-window gradient and
-        // clip pass on every display frame.
-        TimelineView(.animation(minimumInterval: SpaceAnimationBudget.glassInterval,
-                                paused: !isRunning)) { timeline in
-            let travel = cockpitWrap(sceneClock.time(at: timeline.date) * 0.06)
-            ZStack {
-                LinearGradient(colors: [.white.opacity(0.09), .white.opacity(0.02), .clear],
-                               startPoint: .top,
-                               endPoint: UnitPoint(x: 0.5, y: 0.42))
-                LinearGradient(colors: [.clear, .black.opacity(0.14)],
-                               startPoint: UnitPoint(x: 0.5, y: 0.78),
-                               endPoint: .bottom)
-                GeometryReader { proxy in
-                    let band = proxy.size.width * 0.18
-                    Rectangle()
-                        .fill(LinearGradient(colors: [.clear, .white.opacity(0.10), .clear],
-                                             startPoint: .leading,
-                                             endPoint: .trailing))
-                        .frame(width: band)
-                        .rotationEffect(.degrees(16))
-                        .offset(x: -band + (proxy.size.width + band * 2) * travel,
-                                y: -proxy.size.height * 0.08)
-                }
+        if let frozenTime {
+            glass(travel: CGFloat(cockpitWrap(frozenTime * 0.06)))
+        } else {
+            // A reflection crossing the glass is deliberately slow. Eight samples
+            // per second look continuous while avoiding a full-window gradient and
+            // clip pass on every display frame.
+            TimelineView(.animation(minimumInterval: SpaceAnimationBudget.glassInterval,
+                                    paused: !isRunning)) { timeline in
+                glass(travel: CGFloat(cockpitWrap(sceneClock.time(at: timeline.date) * 0.06)))
             }
-            .clipShape(SpaceModuleShape(cut: cut))
         }
+    }
+
+    private func glass(travel: CGFloat) -> some View {
+        ZStack {
+            LinearGradient(colors: [.white.opacity(0.09), .white.opacity(0.02), .clear],
+                           startPoint: .top,
+                           endPoint: UnitPoint(x: 0.5, y: 0.42))
+            LinearGradient(colors: [.clear, .black.opacity(0.14)],
+                           startPoint: UnitPoint(x: 0.5, y: 0.78),
+                           endPoint: .bottom)
+            GeometryReader { proxy in
+                let band = proxy.size.width * 0.18
+                Rectangle()
+                    .fill(LinearGradient(colors: [.clear, .white.opacity(0.10), .clear],
+                                         startPoint: .leading,
+                                         endPoint: .trailing))
+                    .frame(width: band)
+                    .rotationEffect(.degrees(16))
+                    .offset(x: -band + (proxy.size.width + band * 2) * travel,
+                            y: -proxy.size.height * 0.08)
+            }
+        }
+        .clipShape(SpaceModuleShape(cut: cut))
         .frame(width: window.width, height: window.height)
         .position(x: window.midX, y: window.midY)
         .allowsHitTesting(false)
@@ -1792,7 +1821,7 @@ private struct SpaceViewportGlass: View {
 
 /// A clock-driven departure, cruise and arrival. Drawing explicit intermediate
 /// frames keeps Canvas animation reliable, even when the game clock is held.
-private struct SpaceForwardJourney: View {
+struct SpaceForwardJourney: View {
     let window: CGRect
     let previousStage: Int
     let stage: Int
@@ -1801,6 +1830,9 @@ private struct SpaceForwardJourney: View {
     let journeyID: Int
     let reduceMotion: Bool
     let previewProgress: CGFloat?
+    /// Offline frames pass the trailer clock so arrival rocks continue into
+    /// the settled cockpit instead of jumping from a frozen time of zero.
+    var previewSceneryTime: TimeInterval? = nil
     let onArrival: () -> Void
 
     @State private var startedAt = Date()
@@ -1821,30 +1853,40 @@ private struct SpaceForwardJourney: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: SpaceAnimationBudget.journeyInterval,
-                                paused: previewProgress != nil)) { timeline in
-            let progress = min(1, max(0, previewProgress ?? CGFloat(
-                timeline.date.timeIntervalSince(startedAt) / GameConfig.stageTravelDuration)))
-            Canvas { context, size in
-                let pane = CGRect(origin: .zero, size: size)
-                let cut = min(size.width, size.height) * 0.11
-                let inset: CGFloat = (isPad ? 26 : 18) * 0.82
-                context.clip(to: SpaceModuleShape(cut: max(2, cut - inset * 0.55))
-                    .path(in: pane.insetBy(dx: inset, dy: inset)))
-                drawFlight(in: context, pane: pane, progress: progress,
-                           sceneryTime: previewProgress == nil && !reduceMotion
-                               ? timeline.date.timeIntervalSinceReferenceDate : 0)
-            }
-            .onChange(of: progress >= 0.68) { _, hasArrived in
-                if hasArrived { onArrival() }
-            }
-            .onAppear {
-                if progress >= 0.68 { onArrival() }
+        Group {
+            if let previewProgress {
+                flightCanvas(progress: min(1, max(0, previewProgress)),
+                             sceneryTime: previewSceneryTime ?? 0)
+            } else {
+                TimelineView(.animation(minimumInterval: SpaceAnimationBudget.journeyInterval,
+                                        paused: false)) { timeline in
+                    let progress = min(1, max(0, CGFloat(
+                        timeline.date.timeIntervalSince(startedAt) / GameConfig.stageTravelDuration)))
+                    flightCanvas(progress: progress,
+                                 sceneryTime: reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate)
+                        .onChange(of: progress >= 0.68) { _, hasArrived in
+                            if hasArrived { onArrival() }
+                        }
+                        .onAppear {
+                            if progress >= 0.68 { onArrival() }
+                        }
+                }
             }
         }
         .frame(width: window.width, height: window.height)
         .position(x: window.midX, y: window.midY)
         .onAppear { startedAt = Date() }
+    }
+
+    private func flightCanvas(progress: CGFloat, sceneryTime: TimeInterval) -> some View {
+        Canvas { context, size in
+            let pane = CGRect(origin: .zero, size: size)
+            let cut = min(size.width, size.height) * 0.11
+            let inset: CGFloat = (isPad ? 26 : 18) * 0.82
+            context.clip(to: SpaceModuleShape(cut: max(2, cut - inset * 0.55))
+                .path(in: pane.insetBy(dx: inset, dy: inset)))
+            drawFlight(in: context, pane: pane, progress: progress, sceneryTime: sceneryTime)
+        }
     }
 
     private func drawFlight(in context: GraphicsContext, pane: CGRect, progress: CGFloat,
@@ -2008,7 +2050,7 @@ private struct VictoryBloom: View {
 /// The cockpit interior: a roof under the HUD, two button columns, a large
 /// chamfered windshield onto a nebula and a planet, and a perspective floor
 /// with a teleporter pad. Everything is drawn from paths and gradients.
-private struct SpaceshipCockpit: View, Equatable {
+struct SpaceshipCockpit: View, Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.layout == rhs.layout && lhs.character == rhs.character && lhs.isPad == rhs.isPad
             && lhs.isRunning == rhs.isRunning && lhs.destinationStage == rhs.destinationStage
@@ -2030,7 +2072,7 @@ private struct SpaceshipCockpit: View, Equatable {
         }
 
         var body: some View {
-            Canvas(opaque: true, rendersAsynchronously: true) { context, size in
+            Canvas(opaque: true, rendersAsynchronously: !cockpit.drawsSynchronously) { context, size in
                 cockpit.drawStatic(in: context, size: size)
             }
         }
@@ -2051,6 +2093,13 @@ private struct SpaceshipCockpit: View, Equatable {
     let isTravelling: Bool
     let feedbacks: [HoopFeedback]
     let artworkRevision: Int
+    /// Trailer frames draw on the calling thread. Live play keeps the async
+    /// canvas so a slow scenery pass cannot stall an answer.
+    var drawsSynchronously: Bool = false
+    /// When set, stars, rocks and LED strips use this time instead of a
+    /// display link. Offline export needs that, because each frame is rendered
+    /// as fast as the CPU allows rather than in real time.
+    var frozenTime: TimeInterval? = nil
 
     private let cyan = Color(red: 0.20, green: 0.82, blue: 1.00)
     private let blue = Color(red: 0.08, green: 0.34, blue: 0.95)
@@ -2087,29 +2136,42 @@ private struct SpaceshipCockpit: View, Equatable {
             // The heavier cockpit scenery deliberately stays on a slow clock.
             // The interactive lion and boundary LEDs have their own cheaper
             // animation paths, so neither needs to inherit this low cadence.
-            TimelineView(.animation(minimumInterval: SpaceAnimationBudget.sceneryInterval,
-                                    paused: !isRunning)) { timeline in
-                // Keep the live clock when the view redraws for pause. Sending
-                // the rocks back to time zero made them jump the moment the
-                // pause card appeared.
-                let time = sceneClock.time(at: timeline.date)
-                Canvas(rendersAsynchronously: true) { context, size in
-                    drawAnimated(in: context, size: size, time: time)
+            if let frozenTime {
+                Canvas(rendersAsynchronously: false) { context, size in
+                    drawAnimated(in: context, size: size, time: frozenTime)
                 }
-            }
-
-            // Only four dashed strokes and their glow are redrawn here. This
-            // dedicated clock keeps the long LED strips fluid while avoiding a
-            // 30-fps redraw of the nebula, asteroids and cockpit effects.
-            TimelineView(.animation(minimumInterval: SpaceAnimationBudget.ledInterval,
-                                    paused: !isRunning)) { timeline in
-                let time = sceneClock.time(at: timeline.date)
                 Canvas { context, size in
                     drawBoundaryLightChains(
                         in: context,
                         size: size,
-                        phase: CGFloat(cockpitWrap(time * 0.028))
+                        phase: CGFloat(cockpitWrap(frozenTime * 0.028))
                     )
+                }
+            } else {
+                TimelineView(.animation(minimumInterval: SpaceAnimationBudget.sceneryInterval,
+                                        paused: !isRunning)) { timeline in
+                    // Keep the live clock when the view redraws for pause. Sending
+                    // the rocks back to time zero made them jump the moment the
+                    // pause card appeared.
+                    let time = sceneClock.time(at: timeline.date)
+                    Canvas(rendersAsynchronously: !drawsSynchronously) { context, size in
+                        drawAnimated(in: context, size: size, time: time)
+                    }
+                }
+
+                // Only four dashed strokes and their glow are redrawn here. This
+                // dedicated clock keeps the long LED strips fluid while avoiding a
+                // 30-fps redraw of the nebula, asteroids and cockpit effects.
+                TimelineView(.animation(minimumInterval: SpaceAnimationBudget.ledInterval,
+                                        paused: !isRunning)) { timeline in
+                    let time = sceneClock.time(at: timeline.date)
+                    Canvas { context, size in
+                        drawBoundaryLightChains(
+                            in: context,
+                            size: size,
+                            phase: CGFloat(cockpitWrap(time * 0.028))
+                        )
+                    }
                 }
             }
         }
@@ -2191,7 +2253,7 @@ private struct SpaceshipCockpit: View, Equatable {
         drawRoof(in: context, size: size, window: window)
         drawUpperWindowHeader(in: context, window: window, cut: cut)
         drawSpace(in: context, window: window, cut: cut, time: 0)
-        drawWindowFrame(in: context, window: window, cut: cut)
+        drawWindowFrame(in: context, window: window, cut: cut, canvas: size)
         drawSill(in: context, window: window, floorTop: floorTop)
         // The deck is the foreground plane of the box. Drawing it last makes
         // it continue over both side walls at exactly the same horizon as the
@@ -3376,14 +3438,38 @@ private struct SpaceshipCockpit: View, Equatable {
                     lineWidth: isPad ? 2 : 1.2)
     }
 
-    private func drawWindowFrame(in context: GraphicsContext, window: CGRect, cut: CGFloat) {
+    /// The answer housings, slightly larger than the tappable stone, so the
+    /// dark window well cannot paint across them when the cockpit canvas
+    /// refreshes at a stage change.
+    private func pathExcludingAnswerStones(canvas: CGSize) -> Path {
+        var path = Path(CGRect(origin: .zero, size: canvas))
+        let side = layout.buttonSize * 1.12
+        for point in layout.buttonPoints {
+            path.addRect(CGRect(x: point.x - side / 2,
+                                y: point.y - side / 2,
+                                width: side,
+                                height: side))
+        }
+        return path
+    }
+
+    private func drawWindowFrame(in context: GraphicsContext,
+                                 window: CGRect,
+                                 cut: CGFloat,
+                                 canvas: CGSize) {
         let width = frameWidth
         let frame = chamfered(window, cut: cut)
-        // Outer shadow well, so the glass reads as recessed into the cabinet.
-        context.stroke(chamfered(window, cut: cut, outset: width * 1.15),
-                       with: .color(.black.opacity(0.55)),
-                       lineWidth: width * 0.9)
-        context.stroke(frame, with: .color(.black.opacity(0.85)), lineWidth: width + 14)
+        // The recessed black well is wider than the lit rail and used to spill
+        // onto the answer stones. Keep that spill out of the housings, and
+        // keep the stones themselves above this canvas, so the well stays
+        // behind them while the destination artwork is replaced.
+        var recess = context
+        recess.clip(to: pathExcludingAnswerStones(canvas: canvas),
+                    style: FillStyle(eoFill: true))
+        recess.stroke(chamfered(window, cut: cut, outset: width * 1.15),
+                      with: .color(.black.opacity(0.55)),
+                      lineWidth: width * 0.9)
+        recess.stroke(frame, with: .color(.black.opacity(0.85)), lineWidth: width + 14)
         context.stroke(frame,
                        with: .linearGradient(Gradient(colors: [metalLight, metal, metalDark, Color(red: 0.10, green: 0.13, blue: 0.22)]),
                                              startPoint: CGPoint(x: 0, y: window.minY - width),

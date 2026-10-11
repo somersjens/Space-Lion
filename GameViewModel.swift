@@ -58,6 +58,9 @@ final class GameViewModel: ObservableObject {
     /// One pace mark per correctly completed question. The HUD only draws the
     /// ten marks belonging to the current stage.
     @Published private(set) var answerPaces: [AnswerPace] = []
+    /// True once a paused run has been dealt behind the start card. Continue
+    /// then opens that same sum instead of replaying the fresh-level entrance.
+    @Published private(set) var resumesPausedSession = false
 
     /// Invalidates pending timed work when a round is superseded (restart, or
     /// leaving the screen), so a late callback can never touch a newer round.
@@ -157,6 +160,7 @@ final class GameViewModel: ObservableObject {
         stageJourneyID = 0
         lastCorrectCatchTime = nil
         answerPaces = []
+        resumesPausedSession = false
         resetQuestionTiming()
         stopClock(rememberingRemaining: false)
         let duration = GameConfig.stageDuration(stage: 1)
@@ -233,8 +237,20 @@ final class GameViewModel: ObservableObject {
     /// glyphs before the display link and tongue animation start running.
     func prepare() {
         guard engine.state == .intro else { return }
-        let resumedRound = PausedSessionStore.shared.session(request.board)?.roundNumber ?? 1
-        engine.prepare(startingAt: resumedRound)
+        let paused = PausedSessionStore.shared.session(request.board)
+        if let paused {
+            // Deal the waiting sum now, while the card still covers the field,
+            // but leave the engine in its intro state so the clock cannot run
+            // until Continue. Order mode is aligned to that same index, so the
+            // route does not reopen on its first sum.
+            let index = MemoryGame.resumeRound(of: paused,
+                                               maximum: request.board.maximum)
+            engine.prepare(startingAt: index)
+            resumesPausedSession = true
+        } else {
+            engine.prepare(startingAt: 1)
+            resumesPausedSession = false
+        }
 #if canImport(UIKit)
         // Allocate and wake every feedback generator while the intro card still
         // covers the playfield. The first answer used to lazily create the
@@ -243,6 +259,9 @@ final class GameViewModel: ObservableObject {
         prepareHaptics()
 #endif
         sync()
+        if let paused, resumesPausedSession {
+            applyPausedProgress(paused)
+        }
     }
 
     /// Starts the level, resuming a paused session when one is waiting.
@@ -259,29 +278,70 @@ final class GameViewModel: ObservableObject {
         isPaused = false
         director.setSuspended(!sceneIsActive)
         PlaytimeTracker.shared.challengeStarted()
-        if let paused = PausedSessionStore.shared.session(request.board) {
-            engine.resume(from: paused)
-            hasBonusFishPower = paused.hasBonusFishPower ?? false
-            lastMissedChallenge = paused.lastMissedChallenge
-            answerPaces = Array((paused.answerPaces ?? [])
-                .prefix(min(paused.correctAnswers, request.board.maximum)))
-            questionElapsed = max(0, paused.currentQuestionElapsedSeconds ?? 0)
-            timedRoundID = engine.round?.id
-            let restoredStage = Self.stage(after: paused.correctAnswers,
-                                           maximum: request.board.maximum)
-            stageNumber = restoredStage
-            let stageDuration = GameConfig.stageDuration(stage: restoredStage)
-            let restored = min(paused.timeRemainingSeconds ?? stageDuration,
-                               stageDuration)
-            timeRemaining = restored
-            clockStoredSeconds = TimeInterval(restored)
+        if let paused = PausedSessionStore.shared.session(request.board),
+           engine.resume(from: paused) {
+            applyPausedProgress(paused)
+            resumesPausedSession = true
         } else {
             engine.start()
+            resumesPausedSession = false
         }
         openRound()
         announceRound()
         sync()
         startClockIfPossible()
+    }
+
+    /// Opens a paused run on the sum that was waiting, with its stage, clock
+    /// and pace dots already in place. The fresh-level fly-in is skipped so
+    /// an in-order route does not appear to start again at the first sum.
+    func beginContinuation() {
+        guard resumesPausedSession, engine.state != .gameOver else {
+            begin()
+            return
+        }
+        isPaused = false
+        director.setSuspended(!sceneIsActive)
+        PlaytimeTracker.shared.challengeStarted()
+        AppAudio.shared.setGameplayActive(true)
+        AppAudio.shared.playSessionStart()
+        if engine.state == .intro, let paused = PausedSessionStore.shared.session(request.board) {
+            engine.resume(from: paused)
+            applyPausedProgress(paused)
+        }
+        if engine.state == .memorising || engine.state == .questionVisible {
+            openRound()
+        }
+        sync()
+        startClockIfPossible()
+    }
+
+    /// Copies the saved stage, clock and pace colours onto the HUD. Called
+    /// once while the card is up, and again once the engine round exists, so
+    /// the dots and the question agree before play resumes.
+    private func applyPausedProgress(_ paused: PausedSession) {
+        hasBonusFishPower = paused.hasBonusFishPower ?? false
+        lastMissedChallenge = paused.lastMissedChallenge
+        let answered = min(paused.correctAnswers, request.board.maximum)
+        answerPaces = Array((paused.answerPaces ?? []).prefix(answered))
+        completedQuestions = answered
+        // Time spent on a sum that was already scored belongs to that sum.
+        // The next one starts its own allowance.
+        let skippedSolvedSum = engine.round != nil && engine.roundNumber > paused.roundNumber
+        questionElapsed = skippedSolvedSum
+            ? 0
+            : max(0, paused.currentQuestionElapsedSeconds ?? 0)
+        if engine.round != nil {
+            timedRoundID = engine.round?.id
+        }
+        let restoredStage = Self.stage(after: paused.correctAnswers,
+                                       maximum: request.board.maximum)
+        stageNumber = restoredStage
+        let stageDuration = GameConfig.stageDuration(stage: restoredStage)
+        let restored = min(paused.timeRemainingSeconds ?? stageDuration,
+                           stageDuration)
+        timeRemaining = restored
+        clockStoredSeconds = TimeInterval(restored)
     }
 
     /// Opens a round for play. Under water there is nothing to memorise: the
@@ -400,6 +460,7 @@ final class GameViewModel: ObservableObject {
         stageJourneyID = 0
         lastCorrectCatchTime = nil
         answerPaces = []
+        resumesPausedSession = false
         resetQuestionTiming()
         stopClock(rememberingRemaining: false)
         timeRemaining = GameConfig.stageDuration(stage: 1)

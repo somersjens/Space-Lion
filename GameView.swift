@@ -231,37 +231,47 @@ struct GameView: View {
 
     private func startPreparedSession() {
         let guidedFromScratch = isTutorialArmed && model.cards == 0
-        showsIntro = false
         if showsPauseCard, model.state != .intro, !guidedFromScratch {
             showsPauseCard = false
+            showsIntro = false
             model.resume()
-        } else {
+            return
+        }
+        if guidedFromScratch, model.state != .intro {
+            model.resetToIntro()
+        }
+        // Normally prepared on the first run-loop turn after appearing;
+        // doing the guarded preparation here as well guarantees the HUD
+        // never falls back to a dash if Start is tapped immediately.
+        model.prepare()
+        if model.resumesPausedSession {
+            // The paused sum, stage and pace dots are already on the HUD.
+            // Show them at once instead of flying in as a brand-new level.
+            revealsFirstQuestion = true
             showsPauseCard = false
-            if guidedFromScratch, model.state != .intro {
-                model.resetToIntro()
-            }
-            // Normally prepared on the first run-loop turn after appearing;
-            // doing the guarded preparation here as well guarantees the HUD
-            // never falls back to a dash if Start is tapped immediately.
-            model.prepare()
-            if isTutorialArmed {
-                model.armTutorial()
-                // However this run ends — taught out, finished early, or left
-                // at the first sum — the menu owes the player its last step.
-                TutorialCenter.shared.guidedRunStarted()
-            }
-            // The cockpit and character start moving now, so the session cue
-            // and gameplay music rise now as well—not after the complete 1.8 s
-            // entrance has already finished.
-            model.beginEntranceAudio()
-            playsFishEntrance = true
-            refreshTutorialCoach(previous: TutorialPlan())
-            revealsFirstQuestion = reduceMotion
-            if !reduceMotion {
-                DispatchQueue.main.async {
-                    withAnimation(.spring(response: 0.48, dampingFraction: 0.72)) {
-                        revealsFirstQuestion = true
-                    }
+            showsIntro = false
+            model.beginContinuation()
+            return
+        }
+        showsPauseCard = false
+        showsIntro = false
+        if isTutorialArmed {
+            model.armTutorial()
+            // However this run ends — taught out, finished early, or left
+            // at the first sum — the menu owes the player its last step.
+            TutorialCenter.shared.guidedRunStarted()
+        }
+        // The cockpit and character start moving now, so the session cue
+        // and gameplay music rise now as well—not after the complete 1.8 s
+        // entrance has already finished.
+        model.beginEntranceAudio()
+        playsFishEntrance = true
+        refreshTutorialCoach(previous: TutorialPlan())
+        revealsFirstQuestion = reduceMotion
+        if !reduceMotion {
+            DispatchQueue.main.async {
+                withAnimation(.spring(response: 0.48, dampingFraction: 0.72)) {
+                    revealsFirstQuestion = true
                 }
             }
         }

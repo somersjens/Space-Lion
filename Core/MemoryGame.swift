@@ -215,12 +215,23 @@ public final class MemoryGame {
         return true
     }
 
+    /// The question to deal when a paused run continues. A correct answer is
+    /// scored before the round counter advances, so a snapshot from that gap
+    /// still names the sum that was just solved. Continue on the next one.
+    /// Order mode walks a fixed route from this index, so a stale round of 1
+    /// must not replay the opening sum after later answers exist.
+    public static func resumeRound(of session: PausedSession, maximum: Int) -> Int {
+        let nextUnsolved = session.correctAnswers + 1
+        let candidate = max(session.roundNumber, nextUnsolved)
+        return min(max(1, candidate), max(1, maximum))
+    }
+
     /// Resumes a level the player left part-way through, restoring the cards,
     /// lives and round they stopped on. Rejected if the record is not playable.
     @discardableResult
     public func resume(from session: PausedSession) -> Bool {
         guard state == .intro, session.isResumable else { return false }
-        roundNumber = session.roundNumber
+        roundNumber = Self.resumeRound(of: session, maximum: min(board.maximum, maximumRounds))
         cards = session.cards
         lifeHalves = session.lifeHalves
         result.correctAnswers = session.correctAnswers
