@@ -96,6 +96,9 @@ struct LevelIntroCard: View {
     /// Supplied directly by a live run. A reopened saved run falls back to the
     /// same value stored in `paused` below.
     var lastMissedChallenge: String? = nil
+    /// Cards already banked in the live run. A paused card with none of them
+    /// is still the start of the game, so the tutorial may begin there.
+    var liveCards: Int = 0
     /// Whether the run this card starts is a guided one. Owned by the game
     /// screen, because the card goes away and the run does not.
     @Binding var isTutorialArmed: Bool
@@ -114,6 +117,10 @@ struct LevelIntroCard: View {
     }
 
     private var isContinuation: Bool { isPauseCard || paused != nil }
+    /// Points already earned on this board, live or saved.
+    private var earnedCards: Int { max(liveCards, paused?.cards ?? 0) }
+    /// A run with points is already underway. Zero points is still the start.
+    private var blocksTutorial: Bool { isContinuation && earnedCards > 0 }
     private var displayedLastChallenge: String? {
         lastMissedChallenge ?? paused?.lastMissedChallenge
     }
@@ -237,12 +244,12 @@ struct LevelIntroCard: View {
         }
     }
 
-    /// What the main button promises. A continuation always says Continue —
-    /// the tutorial cannot be switched on there — so the guided wording only
-    /// ever replaces the plain Start.
+    /// What the main button promises. A scored continuation says Continue.
+    /// With no points yet the tutorial can still take the place of Start.
     private var startTitleKey: LocalizedStringKey {
+        if isTutorialArmed && !blocksTutorial { return "game.intro.startTutorial" }
         if isContinuation { return "game.intro.continue" }
-        return isTutorialArmed ? "game.intro.startTutorial" : "game.intro.start"
+        return "game.intro.start"
     }
 
     private var actionButtons: some View {
@@ -365,7 +372,7 @@ struct LevelIntroCard: View {
     private var tutorialButton: some View {
         Button {
             AppAudio.shared.playMenuTap()
-            guard !isContinuation else {
+            guard !blocksTutorial else {
                 withAnimation(.easeInOut(duration: 0.2)) { showsTutorialNotice = true }
                 return
             }

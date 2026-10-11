@@ -66,6 +66,14 @@ struct GameView: View {
     /// The tutorial switch on the start card. It only decides what the start
     /// button says and does; the run itself is driven by the view model.
     @State private var isTutorialArmed = false
+    /// The lesson card, kept for a moment after the farewell so it can slide
+    /// off the bottom of the glass instead of vanishing in place.
+    @State private var coachSnapshot: (plan: TutorialPlan, text: String)?
+    @State private var coachOffset: CGFloat = 0
+    /// One louver clock for the sum and every answer stone.
+    @State private var hatchProgress: CGFloat = 0
+    @State private var fireworksToken = 0
+    @State private var entranceReadinessToken: UUID?
     /// The first prepared sum is already available behind the start card. This
     /// controls its one-off HUD entrance while the character is still flying
     /// in, instead of leaving a dash in the question panel until landing.
@@ -130,6 +138,7 @@ struct GameView: View {
                                theme: character,
                                isPauseCard: showsPauseCard,
                                lastMissedChallenge: model.lastMissedChallenge,
+                               liveCards: model.cards,
                                isTutorialArmed: $isTutorialArmed,
                                onStart: startSession,
                                onExit: { dismiss() })
@@ -145,10 +154,41 @@ struct GameView: View {
         .animation(.easeInOut(duration: 0.25), value: showsIntro)
         .onAppear {
             screenInsets = ScreenSafeArea.current
+            SpaceLionPlayfield.prewarmArtwork(for: character)
+            AppAudio.shared.prepare()
             model.setSceneActive(scenePhase == .active)
             // Let the start card reach the screen first, then use the covered
             // playfield to prepare every sum and the first visible glyphs.
             DispatchQueue.main.async { model.prepare() }
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--performance-autoplay") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                    guard showsIntro, model.state == .intro else { return }
+                    startSession()
+                }
+            }
+#endif
+        }
+        .onChange(of: model.tutorial.hatchesClosed) { _, closed in
+            let duration = reduceMotion ? 0.01 : model.tutorial.hatchDuration
+            withAnimation(.timingCurve(0.4, 0.0, 0.16, 1, duration: max(0.01, duration))) {
+                hatchProgress = closed ? 1 : 0
+            }
+        }
+        .onChange(of: model.tutorial) { previous, _ in
+            refreshTutorialCoach(previous: previous)
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--performance-autoplay"),
+               let quiz = model.tutorial.quiz {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    guard model.tutorial.quiz == quiz, !showsIntro else { return }
+                    _ = model.confirmTutorialChoice(quiz.correct)
+                }
+            }
+#endif
+        }
+        .onChange(of: showsIntro) { _, _ in
+            refreshTutorialCoach(previous: model.tutorial)
         }
         .onChange(of: model.isGameOver) { _, isOver in
             guard isOver else {
@@ -171,19 +211,35 @@ struct GameView: View {
                 showsResult = true
             }
         }
-        .onDisappear { model.end() }
+        .onDisappear {
+            AppAudio.shared.cancelEntrance(entranceReadinessToken)
+            entranceReadinessToken = nil
+            model.end()
+        }
         .onChange(of: scenePhase) { _, phase in
             model.setSceneActive(phase == .active)
         }
     }
 
     private func startSession() {
+        guard entranceReadinessToken == nil else { return }
+        entranceReadinessToken = AppAudio.shared.whenEffectsReady {
+            entranceReadinessToken = nil
+            startPreparedSession()
+        }
+    }
+
+    private func startPreparedSession() {
+        let guidedFromScratch = isTutorialArmed && model.cards == 0
         showsIntro = false
-        if showsPauseCard, model.state != .intro {
+        if showsPauseCard, model.state != .intro, !guidedFromScratch {
             showsPauseCard = false
             model.resume()
         } else {
             showsPauseCard = false
+            if guidedFromScratch, model.state != .intro {
+                model.resetToIntro()
+            }
             // Normally prepared on the first run-loop turn after appearing;
             // doing the guarded preparation here as well guarantees the HUD
             // never falls back to a dash if Start is tapped immediately.
@@ -199,6 +255,7 @@ struct GameView: View {
             // entrance has already finished.
             model.beginEntranceAudio()
             playsFishEntrance = true
+            refreshTutorialCoach(previous: TutorialPlan())
             revealsFirstQuestion = reduceMotion
             if !reduceMotion {
                 DispatchQueue.main.async {
@@ -261,6 +318,7 @@ struct GameView: View {
                               // three are inert in a normal session, and the
                               // playing field costs nothing for them.
                               tutorial: model.tutorial,
+                              hatchProgress: hatchProgress,
                               tutorialMessage: nil,
                               onTutorialEvent: handleTutorialEvent(_:),
                               onHit: { optionID, usesSpeedBonus, usesHalfLifePenalty in
@@ -285,6 +343,16 @@ struct GameView: View {
                         .allowsHitTesting(!showsIntro && !showsResult)
                 }
 
+                if fireworksToken > 0 {
+                    TutorialFireworks(accent: character.color,
+                                      isPad: isPad,
+                                      reduceMotion: reduceMotion)
+                        .id(fireworksToken)
+                        .position(cockpitMetrics.centre)
+                        .allowsHitTesting(false)
+                        .zIndex(4)
+                }
+
                 if model.comboAnnouncementID > 0 {
                     ComboHoopBanner(token: model.comboAnnouncementID,
                                    character: character,
@@ -293,12 +361,12 @@ struct GameView: View {
                         .allowsHitTesting(false)
                 }
 
-                if showsTutorialCoach, let tutorialMessage {
+                if let coach = coachSnapshot {
                     Color.clear
                         .allowsHitTesting(false)
                         .overlay(alignment: .bottom) {
-                            TutorialCoach(plan: model.tutorial,
-                                          text: tutorialMessage,
+                            TutorialCoach(plan: coach.plan,
+                                          text: coach.text,
                                           theme: character,
                                           isPad: isPad,
                                           onChoose: { value in
@@ -306,16 +374,12 @@ struct GameView: View {
                                               if accepted { AppAudio.shared.playCorrect() }
                                               else { AppAudio.shared.playWrongAnswer() }
                                               return accepted
-                                          },
-                                          onContinue: {
-                                              AppAudio.shared.playMenuTap()
-                                              model.continueTutorialReveal()
                                           })
                                 .padding(.horizontal, isPad ? 48 : 20)
                                 .padding(.bottom, max(screenInsets.bottom, 8) + (isPad ? 16 : 8))
-                                .allowsHitTesting(model.tutorial.capturesTouches)
+                                .offset(y: coachOffset)
+                                .allowsHitTesting(coach.plan.capturesTouches && coachOffset == 0)
                         }
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                         .zIndex(3)
                 }
 
@@ -388,6 +452,7 @@ struct GameView: View {
             cockpitPanel(holographic: true,
                          expands: true,
                          focused: model.tutorial.highlightsQuestion,
+                         shutterProgress: hatchProgress,
                          height: hudHeight) {
                 questionReadout
             }
@@ -686,6 +751,7 @@ struct GameView: View {
         holographic: Bool = false,
         expands: Bool = false,
         focused: Bool = false,
+        shutterProgress: CGFloat = 0,
         height: CGFloat,
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -762,6 +828,12 @@ struct GameView: View {
                 .shadow(color: .black.opacity(0.45), radius: 8, y: 4)
                 .shadow(color: hudCyan.opacity(0.28), radius: 10, y: 2)
             }
+            .overlay {
+                CockpitLouverHatch(progress: shutterProgress)
+                    .clipShape(CockpitHUDShape(cut: cut))
+                    .padding(isPad ? 4 : 2.5)
+                    .allowsHitTesting(false)
+            }
             // These displays hang from the roof rather than lying flat on the
             // screen. A restrained forward pitch exposes the lower housing and
             // creates depth without compromising text legibility or hit areas.
@@ -798,10 +870,37 @@ struct GameView: View {
     /// housings, but leaves them empty. Pause fills them again and blurs the sum.
     private var hudIsFilled: Bool { !showsIntro || showsPauseCard }
 
-    /// The coach waits until the lion has landed and a question is on the glass.
-    private var showsTutorialCoach: Bool {
-        model.tutorial.isRunning && !showsIntro && !playsFishEntrance
-            && !showsResult && !playsLevelCompletion && !model.isStageTransitioning
+    /// Keeps the lesson card in step with the director. The first card appears
+    /// as soon as the start card leaves, while the lion is still coming in.
+    /// The farewell is the one card that slides off the bottom.
+    private func refreshTutorialCoach(previous: TutorialPlan) {
+        if showsResult || playsLevelCompletion {
+            coachSnapshot = nil
+            coachOffset = 0
+            return
+        }
+        if showsIntro {
+            if previous.step != .ready { coachSnapshot = nil }
+            return
+        }
+        if let step = model.tutorial.step {
+            coachSnapshot = (model.tutorial, L(key: step.messageKey))
+            if previous.step == nil { coachOffset = 0 }
+            if step == .ready, previous.step != .ready {
+                fireworksToken &+= 1
+                AppAudio.shared.playEndCelebration()
+            }
+        } else if previous.step == .ready, coachSnapshot != nil {
+            withAnimation(.easeIn(duration: 0.55)) { coachOffset = 480 }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.58) {
+                guard model.tutorial.step == nil else { return }
+                coachSnapshot = nil
+                coachOffset = 0
+            }
+        } else {
+            coachSnapshot = nil
+            coachOffset = 0
+        }
     }
 
     private var showsInstrumentHUD: Bool {

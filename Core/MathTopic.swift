@@ -222,9 +222,9 @@ public enum MathScaling {
     /// one and every percentage taught before it, in learning order.
     public static func earlierPercentages(_ level: Int) -> [Int] {
         let index = clampIndex(level, count: percentageLevels.count)
-        // Reversed so the current percentage sits last, where the weighted pick
-        // leans hardest; the earliest ones stay in the mix but come up least.
-        return Array(percentageLevels[...index]).reversed()
+        // The current percentage sits last, where the weighted pick leans
+        // hardest; earlier lessons remain available with lower weights.
+        return Array(percentageLevels[...index])
     }
 }
 

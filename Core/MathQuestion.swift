@@ -85,7 +85,9 @@ public enum QuestionKind: String, Codable, Sendable, CaseIterable {
 /// Answers are compared by *meaning*, not by spelling, so a distractor can
 /// never accidentally be a second correct answer: "6", "06" and "6/1" all
 /// collapse to the same value, and "50%" never collides with the number 50.
-public struct AnswerValue: Hashable, Sendable, Comparable {
+/// A pure value. It stays off the main actor so question generation can put
+/// answers in a `Set` without crossing an isolation boundary.
+public nonisolated struct AnswerValue: Hashable, Sendable, Comparable {
     private enum Form: Hashable {
         /// A rational number in lowest terms.
         case rational(numerator: Int, denominator: Int)
@@ -146,13 +148,15 @@ public struct AnswerValue: Hashable, Sendable, Comparable {
     /// and for the decimal answers the Percentages "Decimal" button produces.
     private static func hundredths(_ text: String) -> Int? {
         let normalized = text.replacingOccurrences(of: ",", with: ".")
-        let parts = normalized.split(separator: ".", maxSplits: 1).map(String.init)
+        let parts = normalized.split(separator: ".", maxSplits: 1,
+                                     omittingEmptySubsequences: false).map(String.init)
         guard let whole = Int(parts.first ?? "") else { return nil }
         guard parts.count > 1 else { return whole * 100 }
         var digits = parts[1]
+        guard (1...2).contains(digits.count), digits.allSatisfy(\.isNumber) else { return nil }
         if digits.count == 1 { digits += "0" }
-        guard let fraction = Int(digits.prefix(2)) else { return nil }
-        return whole * 100 + (whole < 0 ? -fraction : fraction)
+        guard let fraction = Int(digits) else { return nil }
+        return whole * 100 + (normalized.hasPrefix("-") ? -fraction : fraction)
     }
 
     private static func reduced(_ numerator: Int, _ denominator: Int) -> (Int, Int) {

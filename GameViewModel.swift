@@ -81,6 +81,12 @@ final class GameViewModel: ObservableObject {
     /// The guided run's state machine. It is asked what to show and which rules
     /// the step being taught bends; it never touches the engine itself.
     private let director = TutorialDirector()
+    /// Set for the life of a guided run, so the clock can be rebuilt for the
+    /// questions still left once the farewell finishes.
+    private var shouldRestoreTutorialClock = false
+    /// The opening answer took longer than its allowance. The stage clock waits
+    /// and that answer's dot is yellow.
+    private var heldTutorialForSlowOpening = false
 
     var acceptsInput: Bool { state == .answering && !isPaused && !isStageTransitioning }
     var totalStages: Int {
@@ -122,8 +128,41 @@ final class GameViewModel: ObservableObject {
     /// so the highlighted cockpit figures and the answers are the same numbers.
     func armTutorial() {
         guard engine.state == .intro else { return }
+        director.setSuspended(!sceneIsActive)
+        shouldRestoreTutorialClock = true
+        heldTutorialForSlowOpening = false
         director.prepare(secondsPerQuestion: secondsPerQuestion, roundCount: totalStages)
         director.begin()
+    }
+
+    /// Drops an unscored run so the tutorial can begin at zero points.
+    func resetToIntro() {
+        shouldRestoreTutorialClock = false
+        heldTutorialForSlowOpening = false
+        director.cancel()
+        generation &+= 1
+        hasRecordedResult = false
+        isPaused = false
+        director.setSuspended(!sceneIsActive)
+        pendingScheduledWork = nil
+        PausedSessionStore.shared.clear(request.board)
+        engine = MemoryGame(level: request.level,
+                            mixedVariant: request.mixedVariant,
+                            mode: request.mode)
+        hasBonusFishPower = false
+        lastMissedChallenge = nil
+        comboAnnouncementID = 0
+        stageNumber = 1
+        isStageTransitioning = false
+        stageJourneyID = 0
+        lastCorrectCatchTime = nil
+        answerPaces = []
+        resetQuestionTiming()
+        stopClock(rememberingRemaining: false)
+        let duration = GameConfig.stageDuration(stage: 1)
+        timeRemaining = duration
+        clockStoredSeconds = TimeInterval(duration)
+        sync()
     }
 
     /// The retired flight field still reports drag and hoop events. Space Lion
@@ -138,19 +177,23 @@ final class GameViewModel: ObservableObject {
         director.choose(value)
     }
 
-    func continueTutorialReveal() {
-        director.continueAfterPaceReveal()
-    }
-
     private func syncTutorial() {
+        let endedLesson = shouldRestoreTutorialClock && !director.isRunning
         set(\.tutorial, director.plan)
         set(\.isRescueHeartDue, engine.isRescueHeartDue && !director.isRunning)
         guard !isPaused, sceneIsActive,
               engine.state != .intro, engine.state != .gameOver else { return }
+        if endedLesson {
+            shouldRestoreTutorialClock = false
+            heldTutorialForSlowOpening = false
+            restoreClockForRemainingQuestions()
+            resumeQuestionTimingIfPossible()
+            return
+        }
         if director.plan.freezesPlay {
             suspendQuestionTiming()
             stopClock(rememberingRemaining: true)
-        } else {
+        } else if !heldTutorialForSlowOpening {
             startClockIfPossible()
             resumeQuestionTimingIfPossible()
         }
@@ -214,6 +257,7 @@ final class GameViewModel: ObservableObject {
     func begin() {
         guard engine.state == .intro else { return }
         isPaused = false
+        director.setSuspended(!sceneIsActive)
         PlaytimeTracker.shared.challengeStarted()
         if let paused = PausedSessionStore.shared.session(request.board) {
             engine.resume(from: paused)
@@ -273,6 +317,7 @@ final class GameViewModel: ObservableObject {
     func pause() {
         guard engine.state != .gameOver else { return }
         isPaused = true
+        director.setSuspended(true)
         suspendQuestionTiming()
         savePausedSessionIfNeeded()
         PlaytimeTracker.shared.challengeEnded()
@@ -286,6 +331,7 @@ final class GameViewModel: ObservableObject {
     func resume() {
         guard engine.state != .intro, engine.state != .gameOver else { return }
         isPaused = false
+        director.setSuspended(!sceneIsActive)
         PlaytimeTracker.shared.challengeStarted()
         AppAudio.shared.setGameplayActive(true)
         sync()
@@ -332,6 +378,8 @@ final class GameViewModel: ObservableObject {
     /// level is spent.
     func restart() {
         // Play again is an ordinary run: the lesson was taught once.
+        shouldRestoreTutorialClock = false
+        heldTutorialForSlowOpening = false
         director.cancel()
         generation &+= 1
         hasRecordedResult = false
@@ -341,7 +389,9 @@ final class GameViewModel: ObservableObject {
         engine = MemoryGame(level: request.level,
                             mixedVariant: request.mixedVariant,
                             mode: request.mode)
-        engine.start()
+        // Replays use the same entrance handover as a fresh run. The clock
+        // and input open only when GameView reports that entrance complete.
+        engine.prepare()
         hasBonusFishPower = false
         lastMissedChallenge = nil
         comboAnnouncementID = 0
@@ -354,11 +404,9 @@ final class GameViewModel: ObservableObject {
         stopClock(rememberingRemaining: false)
         timeRemaining = GameConfig.stageDuration(stage: 1)
         clockStoredSeconds = TimeInterval(timeRemaining)
-        AppAudio.shared.playSessionStart()
-        openRound()
-        announceRound()
+        director.setSuspended(!sceneIsActive)
+        beginEntranceAudio()
         sync()
-        startClockIfPossible()
     }
 
     // MARK: - Round flow
@@ -397,10 +445,16 @@ final class GameViewModel: ObservableObject {
         let startsNewStage: Bool
         switch outcome {
         case .correct(_, let usedBonusFish):
-            recordAnswerPace(elapsed: responseTime)
+            let openingWasSlow = heldTutorialForSlowOpening
+            heldTutorialForSlowOpening = false
+            recordAnswerPace(elapsed: openingWasSlow
+                             ? responseTime + Double(secondsPerQuestion)
+                             : responseTime)
             if director.isRunning {
-                director.noteCorrectAnswer(seconds: responseTime,
-                                           isFast: responseTime <= Double(secondsPerQuestion))
+                director.noteCorrectAnswer(
+                    seconds: responseTime,
+                    isFast: !openingWasSlow && responseTime <= Double(secondsPerQuestion)
+                )
             }
             let now = ProcessInfo.processInfo.systemUptime
             if let previous = lastCorrectCatchTime, now - previous <= 1 {
@@ -559,6 +613,7 @@ final class GameViewModel: ObservableObject {
     /// existing pause/navigation flow.
     func setSceneActive(_ active: Bool) {
         sceneIsActive = active
+        director.setSuspended(!active || isPaused)
         if active {
             startClockIfPossible()
             resumeQuestionTimingIfPossible()
@@ -578,8 +633,12 @@ final class GameViewModel: ObservableObject {
     private func startClockIfPossible() {
         guard clockSubscription == nil, sceneIsActive, !isPaused,
               !isStageTransitioning, !tutorial.freezesPlay,
+              !heldTutorialForSlowOpening,
               engine.state != .intro, engine.state != .gameOver,
               clockStoredSeconds > 0 else { return }
+        if director.isRunning, clockStoredSeconds <= Double(GameConfig.tutorialClockFloor) {
+            return
+        }
         clockDeadline = Date().addingTimeInterval(clockStoredSeconds)
         // The display only publishes whole seconds. Sampling twice per second
         // keeps the deadline accurate while halving otherwise invisible main-
@@ -594,13 +653,31 @@ final class GameViewModel: ObservableObject {
     }
 
     private func stopClock(rememberingRemaining: Bool) {
-        if rememberingRemaining { clockStoredSeconds = TimeInterval(currentClockSeconds) }
+        if rememberingRemaining, let deadline = clockDeadline {
+            // Preserve fractions of a second. Rounding up on each tutorial
+            // freeze or pause used to give the player extra time repeatedly.
+            clockStoredSeconds = max(0, deadline.timeIntervalSinceNow)
+        }
         clockSubscription?.cancel()
         clockSubscription = nil
         clockDeadline = nil
     }
 
     private func updateClock() {
+        if director.isRunning {
+            holdOpeningClockIfNeeded()
+            if heldTutorialForSlowOpening { return }
+            let remaining = currentClockSeconds
+            if remaining <= GameConfig.tutorialClockFloor {
+                stopClock(rememberingRemaining: false)
+                clockStoredSeconds = TimeInterval(GameConfig.tutorialClockFloor)
+                set(\.timeRemaining, GameConfig.tutorialClockFloor)
+                return
+            }
+            set(\.timeRemaining, remaining)
+            return
+        }
+
         let remaining = currentClockSeconds
         set(\.timeRemaining, remaining)
         guard remaining == 0 else { return }
@@ -611,6 +688,31 @@ final class GameViewModel: ObservableObject {
         engine.expireTime()
         finishSession(playsFanfare: true)
         sync()
+    }
+
+    /// The first lesson waits on the opening sum. Past its allowance the stage
+    /// clock parks, and the answer that eventually lands is a yellow dot.
+    /// Question timing itself keeps running, so the recorded time stays honest.
+    private func holdOpeningClockIfNeeded() {
+        guard director.step == .findMatch, !heldTutorialForSlowOpening else { return }
+        guard currentQuestionElapsed >= Double(secondsPerQuestion) else { return }
+        heldTutorialForSlowOpening = true
+        let remaining = max(GameConfig.tutorialClockFloor, currentClockSeconds)
+        stopClock(rememberingRemaining: false)
+        clockStoredSeconds = TimeInterval(remaining)
+        set(\.timeRemaining, remaining)
+    }
+
+    /// After the lesson, the round gets a full allowance for every question
+    /// that has not been answered yet.
+    private func restoreClockForRemainingQuestions() {
+        let answeredInStage = engine.result.correctAnswers % GameConfig.questionsPerStage
+        let remainingQuestions = max(1, GameConfig.questionsPerStage - answeredInStage)
+        let seconds = remainingQuestions * secondsPerQuestion
+        stopClock(rememberingRemaining: false)
+        clockStoredSeconds = TimeInterval(seconds)
+        set(\.timeRemaining, seconds)
+        startClockIfPossible()
     }
 
     /// Writes the session to disk exactly once, whichever way the screen is

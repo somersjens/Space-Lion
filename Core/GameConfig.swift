@@ -59,6 +59,11 @@ public enum GameConfig {
     /// game model, which holds input and the question clock until landing.
     public static let stageTravelDuration = 3.2
 
+    /// During the tutorial the stage clock never reaches zero. It parks here
+    /// and, once the lesson ends, is replaced by a full allowance for the
+    /// questions still left in the round.
+    public static let tutorialClockFloor = 5
+
     /// Defensive upper bound for generated questions and restored sessions.
     public static let maximumRoundCeiling = 10_000
 

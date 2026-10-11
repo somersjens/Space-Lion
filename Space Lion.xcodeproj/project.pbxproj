@@ -19,7 +19,7 @@
 		F94005153074D18500BC6413 /* sfx_select.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94004FD3074D18500BC6413 /* sfx_select.caf */; };
 		F94005163074D18500BC6413 /* sfx_card_reveal.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94004F33074D18500BC6413 /* sfx_card_reveal.caf */; };
 		F94005173074D18500BC6413 /* sfx_switch_on.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94005003074D18500BC6413 /* sfx_switch_on.caf */; };
-		F94005183074D18500BC6413 /* background_music.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = F94004C03074D18500BC6413 /* background_music.mp3 */; };
+		F94005183074D18500BC6413 /* background_music.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F94004C03074D18500BC6413 /* background_music.m4a */; };
 		F94005193074D18500BC6413 /* sfx_switch_off.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94004FF3074D18500BC6413 /* sfx_switch_off.caf */; };
 		F940051A3074D18500BC6413 /* sfx_level_complete.caf in Resources */ = {isa = PBXBuildFile; fileRef = F94004FB3074D18500BC6413 /* sfx_level_complete.caf */; };
 		F940051C3074D18500BC6413 /* Products.storekit in Resources */ = {isa = PBXBuildFile; fileRef = F94004E13074D18500BC6413 /* Products.storekit */; };
@@ -84,11 +84,13 @@
 /* Begin PBXFileReference section */
 		A10000013074D18500BC6413 /* SpaceLionPlayfield.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceLionPlayfield.swift; sourceTree = "<group>"; };
 		A1B2C3D43074D18500BC6413 /* sfx_button_press.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = sfx_button_press.caf; sourceTree = "<group>"; };
+		A1TR00013074D18500BC6413 /* trailer-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "trailer-icon.png"; sourceTree = "<group>"; };
+		A1TR00023074D18500BC6413 /* trailer-icon-original.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "trailer-icon-original.png"; sourceTree = "<group>"; };
 		F94004AD3074D11400BC6413 /* Space Lion.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Space Lion.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F94004BD3074D18500BC6413 /* AppAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudio.swift; sourceTree = "<group>"; };
 		F94004BE3074D18500BC6413 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		F94004BF3074D18500BC6413 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		F94004C03074D18500BC6413 /* background_music.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = background_music.mp3; sourceTree = "<group>"; };
+		F94004C03074D18500BC6413 /* background_music.m4a */ = {isa = PBXFileReference; lastKnownFileType = file; path = background_music.m4a; sourceTree = "<group>"; };
 		F94004C13074D18500BC6413 /* CharacterUnlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterUnlocks.swift; sourceTree = "<group>"; };
 		F94004C23074D18500BC6413 /* DecimalAnswer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecimalAnswer.swift; sourceTree = "<group>"; };
 		F94004C33074D18500BC6413 /* GameConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameConfig.swift; sourceTree = "<group>"; };
@@ -122,8 +124,6 @@
 		F94004E03074D18500BC6413 /* PremiumView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumView.swift; sourceTree = "<group>"; };
 		F94004E13074D18500BC6413 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Products.storekit; sourceTree = "<group>"; };
 		F94004E23074D18500BC6413 /* ProgressSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressSync.swift; sourceTree = "<group>"; };
-		A1TR00013074D18500BC6413 /* trailer-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = trailer-icon.png; sourceTree = "<group>"; };
-		A1TR00023074D18500BC6413 /* trailer-icon-original.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = trailer-icon-original.png; sourceTree = "<group>"; };
 		F94004E33074D18500BC6413 /* PromoStillCompositionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromoStillCompositionView.swift; sourceTree = "<group>"; };
 		F94004E43074D18500BC6413 /* TrailerCompositionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrailerCompositionView.swift; sourceTree = "<group>"; };
 		F94004E63074D18500BC6413 /* PromotedPurchaseCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromotedPurchaseCoordinator.swift; sourceTree = "<group>"; };
@@ -180,7 +180,7 @@
 				F94004BD3074D18500BC6413 /* AppAudio.swift */,
 				F94004BE3074D18500BC6413 /* AppSettings.swift */,
 				F94004BF3074D18500BC6413 /* Assets.xcassets */,
-				F94004C03074D18500BC6413 /* background_music.mp3 */,
+				F94004C03074D18500BC6413 /* background_music.m4a */,
 				F94004CD3074D18500BC6413 /* Core */,
 				F94004CE3074D18500BC6413 /* ElephantChallengeApp.swift */,
 				F94004CF3074D18500BC6413 /* EmphasizedText.swift */,
@@ -361,7 +361,7 @@
 				F94005153074D18500BC6413 /* sfx_select.caf in Resources */,
 				F94005163074D18500BC6413 /* sfx_card_reveal.caf in Resources */,
 				F94005173074D18500BC6413 /* sfx_switch_on.caf in Resources */,
-				F94005183074D18500BC6413 /* background_music.mp3 in Resources */,
+				F94005183074D18500BC6413 /* background_music.m4a in Resources */,
 				F94005193074D18500BC6413 /* sfx_switch_off.caf in Resources */,
 				F940051A3074D18500BC6413 /* sfx_level_complete.caf in Resources */,
 				F940051C3074D18500BC6413 /* Products.storekit in Resources */,
@@ -571,10 +571,10 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIInterfaceOrientation = UIInterfaceOrientationLandscapeRight;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
-				INFOPLIST_KEY_UIInterfaceOrientation = UIInterfaceOrientationLandscapeRight;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
@@ -621,10 +621,10 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIInterfaceOrientation = UIInterfaceOrientationLandscapeRight;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
-				INFOPLIST_KEY_UIInterfaceOrientation = UIInterfaceOrientationLandscapeRight;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;

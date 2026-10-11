@@ -37,7 +37,7 @@ enum TutorialStep: Int, Equatable, CaseIterable {
     case findMatch = 1
     /// Each round holds ten questions. How many seconds does each one get?
     case watchClock
-    /// Green is within the question allowance, yellow is slower. Prove it twice.
+    /// Green is within the question allowance, yellow is slower. Show three answers.
     case paceDots
     /// Harder levels contain more rounds. How many does this one have?
     case countRounds
@@ -53,7 +53,7 @@ enum TutorialStep: Int, Equatable, CaseIterable {
         case .watchClock:  return "timer"
         case .paceDots:    return "circle.grid.2x2.fill"
         case .countRounds: return "flag.checkered"
-        case .ready:       return "paperplane.fill"
+        case .ready:       return "star.fill"
         }
     }
 }
@@ -150,8 +150,14 @@ struct TutorialPlan: Equatable {
     /// complete move on the next set: down, underneath, and back into the air.
     var demonstratesDive = false
 
-    /// The side buttons accept a tap. Quizzes and the farewell hold them.
+    /// The side buttons accept a tap. Quizzes hold them; the farewell does not.
     var blocksAnswers = false
+    /// The blast louvers over the answers and the sum. Separate from
+    /// `blocksAnswers` so they can travel while the lion is still flying home.
+    var hatchesClosed = false
+    /// How long the louvers take to travel. A later lesson can close more
+    /// slowly than the one before it.
+    var hatchDuration: Double = 1.15
     /// The stage clock and the question timer wait, so a quiz does not spend
     /// the time the lesson is asking about.
     var freezesPlay = false
@@ -161,7 +167,7 @@ struct TutorialPlan: Equatable {
     var highlightsRoundCount = false
     var quiz: TutorialQuiz?
     var paceSamples: [TutorialPaceSample] = []
-    /// The two pace answers have landed and are being shown back.
+    /// The three pace answers have landed and are being shown back.
     var showsPaceReveal = false
 
     var isRunning: Bool { step != nil }
@@ -178,16 +184,20 @@ struct TutorialPlan: Equatable {
         case .watchClock:
             plan.blocksAnswers = true
             plan.freezesPlay = true
+            plan.hatchesClosed = true
+            plan.hatchDuration = 1.05
             plan.highlightsTimeAllowance = true
         case .paceDots:
             plan.highlightsPaceDots = true
+            plan.hatchDuration = 1.05
         case .countRounds:
             plan.blocksAnswers = true
             plan.freezesPlay = true
+            plan.hatchesClosed = true
             plan.highlightsRoundCount = true
         case .ready:
-            plan.blocksAnswers = true
             plan.freezesPlay = true
+            plan.hatchDuration = 1.25
         case .none:
             break
         }
@@ -233,13 +243,12 @@ final class TutorialDirector {
 
     /// How long a correct match is given before the next card replaces it.
     private static let matchHandover = 0.55
-    /// How long the two pace times stay up before the rounds quiz, if the
-    /// player does not tap Continue.
-    private static let paceReveal = 4.2
-    /// How long the closing message stays up.
+    /// How long the third pace time stays readable before that card leaves.
+    private static let paceClose = 2.0
+    /// How long the closing message stays up before it slides away.
     private static let farewell = 3.6
-    /// Step 3 asks for two completed answers before it shows their times.
-    private static let paceAnswers = 2
+    /// Step 3 asks for three completed answers, and shows each time at once.
+    private static let paceAnswers = 3
 
     /// Seconds the highlighted allowance actually grants. Stage 1 is 10.
     private var secondsPerQuestion = GameConfig.secondsPerQuestionByStage[0]
@@ -249,7 +258,23 @@ final class TutorialDirector {
     /// True between a step being satisfied and the next one arriving, so the
     /// step that is on its way out cannot be completed a second time.
     private var isAdvancing = false
-    private var stepWork: DispatchWorkItem?
+    private let stepWork = TutorialScheduledAction()
+    /// The louvers travel on their own clock, so a step change cannot cancel
+    /// a shutter that is already on its way.
+    private let hatchWork = TutorialScheduledAction()
+    private var isSuspended = false
+
+    func setSuspended(_ suspended: Bool) {
+        guard isSuspended != suspended else { return }
+        isSuspended = suspended
+        if suspended {
+            stepWork.suspend()
+            hatchWork.suspend()
+        } else {
+            stepWork.resume()
+            hatchWork.resume()
+        }
+    }
 
     // MARK: Lifecycle
 
@@ -269,8 +294,8 @@ final class TutorialDirector {
     /// Ends the run without finishing it — the screen is going away, or the
     /// session ended under the tutorial's feet.
     func cancel() {
-        stepWork?.cancel()
-        stepWork = nil
+        stepWork.cancel()
+        hatchWork.cancel()
         isAdvancing = false
         paceSamples = []
         guard plan.step != nil else { return }
@@ -291,22 +316,25 @@ final class TutorialDirector {
         switch step {
         case .findMatch:
             guard !isAdvancing else { return }
-            plan.blocksAnswers = true
             plan.freezesPlay = true
             onChange?()
+            // The lion is still on the stone. The louvers start once it pushes
+            // off, and they finish as it drifts back to the middle.
+            closeHatches(after: 0.24, duration: 1.15)
             advance(to: .watchClock, after: Self.matchHandover)
         case .paceDots:
-            guard !plan.showsPaceReveal, !plan.blocksAnswers else { return }
+            guard paceSamples.count < Self.paceAnswers, !plan.blocksAnswers else { return }
             paceSamples.append(TutorialPaceSample(index: paceSamples.count,
                                                   seconds: seconds,
                                                   isFast: isFast))
             plan.paceSamples = paceSamples
             if paceSamples.count >= Self.paceAnswers {
-                plan.blocksAnswers = true
                 plan.freezesPlay = true
                 onChange?()
-                schedule(after: Self.matchHandover) { [weak self] in
-                    self?.showPaceReveal()
+                closeHatches(after: 0.24, duration: 1.6)
+                schedule(after: Self.paceClose) { [weak self] in
+                    guard let self, self.plan.step == .paceDots, !self.isAdvancing else { return }
+                    self.advance(to: .countRounds, after: 0)
                 }
             } else {
                 onChange?()
@@ -324,29 +352,12 @@ final class TutorialDirector {
         if isAdvancing { return value == quiz.correct }
         guard value == quiz.correct else { return false }
         let next: TutorialStep = plan.step == .watchClock ? .paceDots : .ready
-        advance(to: next, after: 0.28)
+        // Opening starts on the tap. The travel itself is the slow part.
+        advance(to: next, after: 0)
         return true
     }
 
-    func continueAfterPaceReveal() {
-        guard plan.step == .paceDots, plan.showsPaceReveal, !isAdvancing else { return }
-        advance(to: .countRounds, after: 0.05)
-    }
-
     // MARK: Plumbing
-
-    private func showPaceReveal() {
-        guard plan.step == .paceDots, !isAdvancing else { return }
-        plan.showsPaceReveal = true
-        plan.blocksAnswers = true
-        plan.freezesPlay = true
-        plan.paceSamples = paceSamples
-        onChange?()
-        schedule(after: Self.paceReveal) { [weak self] in
-            guard let self, self.plan.showsPaceReveal, !self.isAdvancing else { return }
-            self.advance(to: .countRounds, after: 0)
-        }
-    }
 
     private func advance(to step: TutorialStep, after delay: Double) {
         isAdvancing = true
@@ -394,11 +405,68 @@ final class TutorialDirector {
         return values.shuffled()
     }
 
+    /// Drops the louvers after the lion has left the stone, and locks the
+    /// buttons at the same moment so the cover and the input agree.
+    private func closeHatches(after delay: Double, duration: Double) {
+        hatchWork.schedule(after: delay, suspended: isSuspended) { [weak self] in
+            guard let self, self.plan.isRunning else { return }
+            self.plan.hatchesClosed = true
+            self.plan.blocksAnswers = true
+            self.plan.hatchDuration = duration
+            self.onChange?()
+        }
+    }
+
     private func schedule(after delay: Double, work: @escaping () -> Void) {
-        stepWork?.cancel()
-        let item = DispatchWorkItem(block: work)
-        stepWork = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+        stepWork.schedule(after: delay, suspended: isSuspended, action: work)
+    }
+}
+
+/// A lesson's handover must spend only visible, active time. Keep the remaining
+/// delay when the player pauses or backgrounds rather than dropping a step.
+@MainActor
+private final class TutorialScheduledAction {
+    private var item: DispatchWorkItem?
+    private var action: (() -> Void)?
+    private var deadline: TimeInterval?
+    private var remaining: TimeInterval = 0
+    private var generation = 0
+
+    func schedule(after delay: TimeInterval, suspended: Bool, action: @escaping () -> Void) {
+        cancel()
+        self.action = action
+        remaining = max(0, delay)
+        if !suspended { resume() }
+    }
+
+    func suspend() {
+        if let deadline { remaining = max(0, deadline - ProcessInfo.processInfo.systemUptime) }
+        generation &+= 1
+        item?.cancel()
+        item = nil
+        deadline = nil
+    }
+
+    func resume() {
+        guard item == nil, action != nil else { return }
+        let token = generation
+        deadline = ProcessInfo.processInfo.systemUptime + remaining
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.generation == token else { return }
+            let callback = self.action
+            self.item = nil
+            self.deadline = nil
+            self.action = nil
+            callback?()
+        }
+        item = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: work)
+    }
+
+    func cancel() {
+        suspend()
+        action = nil
+        remaining = 0
     }
 }
 
@@ -585,7 +653,6 @@ struct TutorialCoach: View {
     let theme: AnimalCharacter
     var isPad: Bool = AppLayout.isPad
     let onChoose: (Int) -> Bool
-    let onContinue: () -> Void
 
     @ObservedObject private var language = LanguageManager.shared
     @State private var rejected: Int?
@@ -604,24 +671,16 @@ struct TutorialCoach: View {
                 }
             }
 
-            if plan.showsPaceReveal, !plan.paceSamples.isEmpty {
-                HStack(spacing: isPad ? 22 : 16) {
+            if plan.step == .paceDots, !plan.paceSamples.isEmpty {
+                HStack(spacing: isPad ? 18 : 12) {
                     ForEach(plan.paceSamples) { sample in
                         paceSample(sample)
+                            .transition(.scale(scale: 0.7).combined(with: .opacity))
                     }
                 }
                 .allowsHitTesting(false)
-
-                Button(action: onContinue) {
-                    Text("common.continue")
-                        .font(.system(size: isPad ? 18 : 15, weight: .heavy, design: .rounded))
-                        .foregroundStyle(theme.deepColor)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, isPad ? 12 : 9)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("tutorial-pace-continue")
+                .animation(.spring(response: 0.34, dampingFraction: 0.72),
+                           value: plan.paceSamples.count)
             }
         }
         .padding(isPad ? 16 : 12)
@@ -720,6 +779,143 @@ struct TutorialCoach: View {
         formatter.maximumFractionDigits = 1
         let number = formatter.string(from: NSNumber(value: seconds)) ?? String(format: "%.1f", seconds)
         return number + "s"
+    }
+}
+
+/// Blast louvers for a stone or the sum. `progress` is one shared clock:
+/// 0 is open, 1 is shut. Every hatch reads that same value, so the sum and
+/// the stones travel together instead of each running its own animation.
+struct CockpitLouverHatch: View, Animatable {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    var body: some View {
+        // One drawing surface replaces four nested stacks, gradients and
+        // shadow subtrees per hatch on every interpolated tutorial frame.
+        Canvas { context, size in
+            guard progress > 0 else { return }
+            let count = 4
+            let seam = max(1, size.height * 0.016)
+            let height = max(1, (size.height - seam * CGFloat(count - 1)) / CGFloat(count))
+            for index in 0..<count {
+                let y = travel(index: index, count: count, slatHeight: height,
+                               seam: seam, span: size.height)
+                guard y + height >= 0 else { continue }
+                let rect = CGRect(x: 0, y: y, width: size.width, height: height)
+                let path = Path(roundedRect: rect, cornerRadius: min(7, height * 0.28))
+                context.drawLayer { slat in
+                    slat.addFilter(.shadow(color: .black.opacity(0.38),
+                                           radius: max(0.5, height * 0.08),
+                                           y: max(0.5, height * 0.06)))
+                    slat.fill(path, with: .linearGradient(Gradient(colors: [
+                        Color(red: 0.62, green: 0.70, blue: 0.82),
+                        Color(red: 0.28, green: 0.34, blue: 0.46),
+                        Color(red: 0.10, green: 0.13, blue: 0.20)
+                    ]), startPoint: CGPoint(x: 0, y: rect.minY),
+                        endPoint: CGPoint(x: 0, y: rect.maxY)))
+                }
+                context.fill(path, with: .linearGradient(Gradient(colors: [.white.opacity(0.42), .clear]),
+                    startPoint: CGPoint(x: 0, y: rect.minY),
+                    endPoint: CGPoint(x: 0, y: rect.midY)))
+                context.stroke(path, with: .color(.white.opacity(index.isMultiple(of: 2) ? 0.34 : 0.18)),
+                               lineWidth: 0.6)
+                context.fill(Path(CGRect(x: 0, y: rect.maxY - 1, width: size.width, height: 1)),
+                             with: .color(Color(red: 0.55, green: 0.86, blue: 1).opacity(0.55)))
+                let diameter = min(5, max(2.2, height * 0.22))
+                let inset = max(3, size.width * 0.055)
+                for x in [inset, size.width - inset - diameter] {
+                    let rivet = Path(ellipseIn: CGRect(x: x, y: rect.midY - diameter / 2,
+                                                       width: diameter, height: diameter))
+                    context.fill(rivet, with: .color(Color(red: 0.78, green: 0.83, blue: 0.90)))
+                    context.stroke(rivet, with: .color(.black.opacity(0.45)), lineWidth: 0.4)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func travel(index: Int, count: Int, slatHeight: CGFloat, seam: CGFloat, span: CGFloat) -> CGFloat {
+        let home = CGFloat(index) * (slatHeight + seam)
+        let parked = -span - CGFloat(count - index) * slatHeight * 0.22
+        let start = CGFloat(index) * 0.07
+        let local = min(1, max(0, (progress - start) / 0.78))
+        let eased = local * local * (3 - 2 * local)
+        return parked + (home - parked) * eased
+    }
+
+}
+
+/// A short burst of stars over the windshield when the lesson is finished.
+struct TutorialFireworks: View {
+    var accent: Color
+    var isPad: Bool
+    var reduceMotion: Bool
+
+    @State private var progress: CGFloat = 0
+
+    var body: some View {
+        TutorialFireworksFrame(accent: accent, isPad: isPad, progress: progress)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .onAppear {
+                guard !reduceMotion else {
+                    progress = 1
+                    return
+                }
+                withAnimation(.easeOut(duration: 1.65)) { progress = 1 }
+            }
+    }
+
+}
+
+/// Interpolate the particle clock itself: delayed bursts otherwise calculate
+/// only their invisible endpoints and never show any intermediate stars.
+private struct TutorialFireworksFrame: View, Animatable {
+    let accent: Color
+    let isPad: Bool
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    var body: some View {
+        ZStack {
+            burst(at: CGPoint(x: isPad ? -150 : -92, y: isPad ? 18 : 10), color: accent, lag: 0)
+            burst(at: CGPoint(x: isPad ? 20 : 8, y: isPad ? -36 : -22),
+                  color: Color(red: 0.45, green: 0.88, blue: 1), lag: 0.12)
+            burst(at: CGPoint(x: isPad ? 160 : 96, y: isPad ? 8 : 4),
+                  color: Color(red: 1, green: 0.86, blue: 0.35), lag: 0.22)
+        }
+    }
+
+    private func burst(at point: CGPoint, color: Color, lag: CGFloat) -> some View {
+        let local = min(1, max(0, (progress - lag) / 0.78))
+        return ZStack {
+            Circle()
+                .fill(color.opacity(0.9))
+                .frame(width: isPad ? 18 : 12, height: isPad ? 18 : 12)
+                .scaleEffect(0.4 + local * 1.6)
+                .opacity(Double(1 - local))
+            ForEach(0..<10, id: \.self) { index in
+                let angle = (CGFloat(index) / 10) * .pi * 2 + lag
+                let distance = (isPad ? 78 : 52) * local
+                Image(systemName: index.isMultiple(of: 2) ? "star.fill" : "sparkle")
+                    .font(.system(size: isPad ? 16 : 11, weight: .black))
+                    .foregroundStyle(index.isMultiple(of: 3) ? .white : color)
+                    .shadow(color: color.opacity(0.9), radius: 4)
+                    .scaleEffect(0.4 + (1 - local) * 0.8)
+                    .opacity(Double(1 - local) * (local > 0.04 ? 1 : 0))
+                    .offset(x: cos(angle) * distance, y: sin(angle) * distance)
+            }
+        }
+        .offset(x: point.x, y: point.y)
     }
 }
 

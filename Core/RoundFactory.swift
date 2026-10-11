@@ -4,13 +4,11 @@
 //
 //  Builds one complete round: the question and the six answer buttons.
 //
-//  The whole sequence is composed before the first sum is shown, one
-//  ten-question stage at a time. A stage starts with six different answers.
-//  After a correct answer only that answer's button receives a new value; the
-//  other five stay exactly where they are. The new value belongs to a question
-//  waiting later in the stage whenever one is still needed, so every upcoming
-//  question always has its answer on the board. A stage boundary may replace
-//  all six values at once.
+//  Compose each ten-question stage in the selected practice route. The six
+//  answer slots stay distinct and stable: only the used slot may change after
+//  a correct answer, and its replacement is the first missing future answer.
+//  Repeated results may keep that slot, so a narrow exercise never has to
+//  invent an out-of-range question just to refresh a button.
 //
 
 import Foundation
@@ -69,6 +67,7 @@ public final class RoundFactory {
     private let slotIDs: [UUID]
     private var plans: [Int: PlannedRound] = [:]
     private var sequenceOrigin: Int?
+    private var nextUnplannedRound: Int?
 
     public init(level: MathLevel,
                 mixedVariant: MixedVariant = .all,
@@ -87,6 +86,7 @@ public final class RoundFactory {
         generator.reset()
         plans.removeAll(keepingCapacity: true)
         sequenceOrigin = nil
+        nextUnplannedRound = nil
     }
 
     /// Composes `count` rounds, starting at `first`, before play begins.
@@ -114,85 +114,57 @@ public final class RoundFactory {
     private func ensurePlanned(through last: Int) {
         let origin = sequenceOrigin ?? last
         if sequenceOrigin == nil { sequenceOrigin = origin }
-        var next = plans.keys.max().map { $0 + 1 } ?? origin
-        if plans.isEmpty { next = origin }
+        var next = nextUnplannedRound ?? origin
         while next <= last {
             let stageEnd = ((next - 1) / GameConfig.questionsPerStage + 1)
                 * GameConfig.questionsPerStage
             planStage(startingAt: next, endingAt: stageEnd)
             next = stageEnd + 1
+            nextUnplannedRound = next
         }
     }
 
-    /// Builds one complete (or, after restoring a paused game, partial) stage.
-    ///
-    /// The first six questions seed the six slots. Their play order is
-    /// shuffled. Each of the first four answers then installs one new question
-    /// at the back of that queue. Once all ten questions have been supplied,
-    /// the used slot still gets a fresh distractor so the physical feedback is
-    /// consistent, but the other five slots remain untouched.
+    /// Keep the same physical slots while playing the generator's exact
+    /// practice route. The first missing future answer takes the spent slot;
+    /// a repeated answer can keep it instead of inventing a harder question.
     private func planStage(startingAt first: Int, endingAt last: Int) {
-        let width = GameConfig.answerBubbleCount
-        let roundCount = max(0, last - first + 1)
-        guard roundCount > 0 else { return }
-
-        let openingQuestionCount = min(width, roundCount)
-        var openingQuestions: [MathQuestion] = []
-        var openingAnswers: Set<AnswerValue> = []
-        while openingQuestions.count < openingQuestionCount {
-            let question = nextDistinctQuestion(avoiding: openingAnswers)
-            openingQuestions.append(question)
-            openingAnswers.insert(AnswerValue(question.correctAnswer))
+        let count = max(0, last - first + 1)
+        guard count > 0 else { return }
+        let questions = (0..<count).map { _ in
+            generator.next(requiredDistractors: GameConfig.distractorCount)
         }
-
-        var pendingQuestions = random.shuffled(openingQuestions)
-        var board = openingQuestions.map(\.correctAnswer)
-        while board.count < width {
+        var board: [String] = []
+        for question in questions where board.count < slotIDs.count {
+            if !board.contains(where: { AnswerValue($0) == AnswerValue(question.correctAnswer) }) {
+                board.append(question.correctAnswer)
+            }
+        }
+        while board.count < slotIDs.count {
             board.append(freshFiller(avoiding: Set(board.map(AnswerValue.init)),
-                                     preferred: openingQuestions.flatMap(\.distractors)))
+                                     preferred: questions.flatMap(\.distractors)))
         }
         board.sort { AnswerValue($0) < AnswerValue($1) }
-
-        for offset in 0..<roundCount {
-            guard !pendingQuestions.isEmpty else { break }
-            let question = pendingQuestions.removeFirst()
+        for (offset, question) in questions.enumerated() {
             let correct = AnswerValue(question.correctAnswer)
-            guard let correctSlot = board.firstIndex(where: { AnswerValue($0) == correct }) else {
+            guard let slot = board.firstIndex(where: { AnswerValue($0) == correct }) else {
+                assertionFailure("Upcoming answer must already be on the board")
                 plans[first + offset] = planFallback(number: first + offset)
                 continue
             }
-
-            let options = board.enumerated().map { index, text in
-                AnswerOption(id: slotIDs[index],
-                             text: text,
-                             isCorrect: index == correctSlot)
-            }
-            plans[first + offset] = PlannedRound(question: question, options: options)
-
-            // There is no following board to update after the final question.
-            guard offset + 1 < roundCount else { continue }
-
-            let supplied = offset + 1 + pendingQuestions.count
-            if supplied < roundCount {
-                let replacementQuestion = nextDistinctQuestion(
-                    avoiding: Set(board.map(AnswerValue.init))
-                )
-                board[correctSlot] = replacementQuestion.correctAnswer
-                pendingQuestions.append(replacementQuestion)
+            plans[first + offset] = PlannedRound(question: question, options: board.enumerated().map {
+                AnswerOption(id: slotIDs[$0.offset], text: $0.element, isCorrect: $0.offset == slot)
+            })
+            let remaining = questions.dropFirst(offset + 1)
+            guard !remaining.isEmpty else { continue }
+            let occupied = Set(board.enumerated().filter { $0.offset != slot }
+                .map { AnswerValue($0.element) })
+            if let needed = remaining.first(where: { !occupied.contains(AnswerValue($0.correctAnswer)) }) {
+                board[slot] = needed.correctAnswer
             } else {
-                board[correctSlot] = freshFiller(
-                    avoiding: Set(board.map(AnswerValue.init)),
-                    preferred: question.distractors
-                )
+                board[slot] = freshFiller(avoiding: Set(board.map(AnswerValue.init)),
+                                         preferred: question.distractors)
             }
         }
-    }
-
-    private func nextDistinctQuestion(avoiding forbidden: Set<AnswerValue>) -> MathQuestion {
-        let generated = generator.next(requiredDistractors: GameConfig.distractorCount,
-                                       avoiding: forbidden)
-        if !forbidden.contains(AnswerValue(generated.correctAnswer)) { return generated }
-        return syntheticQuestion(avoiding: forbidden)
     }
 
     /// Gives an already-spent slot a visibly new value when no later question
@@ -206,18 +178,6 @@ public final class RoundFactory {
         var value = 0
         while forbidden.contains(AnswerValue("\(value)")) { value += 1 }
         return "\(value)"
-    }
-
-    /// A plain sum whose result is still free. Used only when the practised
-    /// route cannot supply another distinct answer for this board.
-    private func syntheticQuestion(avoiding forbidden: Set<AnswerValue>) -> MathQuestion {
-        var answer = 0
-        while forbidden.contains(AnswerValue("\(answer)")) { answer += 1 }
-        return MathQuestion(prompt: "0 + \(answer) = ?",
-                            correctAnswer: "\(answer)",
-                            distractors: (1...6).map { String(answer + $0) },
-                            sourceLevel: 1,
-                            kind: .addition)
     }
 
     /// Only reached when a stage could not be filled. Keeps the session

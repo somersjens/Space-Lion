@@ -92,7 +92,7 @@ struct ElephantChallengeApp: App {
         // The deterministic App Store trailer exporter is development tooling.
         // It deliberately bypasses persistence, StoreKit, notifications and
         // onboarding so an export cannot mutate a real player's state.
-        if TrailerRuntime.isExporting || planetDesignPreviewStage != nil { return }
+        if TrailerRuntime.isExporting || planetDesignPreviewStage != nil || performanceGame { return }
 
         // Bring stored progress up to the current version before anything can
         // read it: data written by Jumping Fox must never reach the new game.
@@ -140,10 +140,23 @@ struct ElephantChallengeApp: App {
 #endif
     }
 
+    /// Reproducible gameplay audit without onboarding or cloud/store setup.
+    /// Use an isolated simulator bundle identifier for these runs.
+    private var performanceGame: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--performance-game")
+#else
+        false
+#endif
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
-                if let stage = planetDesignPreviewStage {
+                if performanceGame {
+                    GameView(request: GameSessionRequest(level: MathLevel(topic: .tables, index: 3),
+                                                         mode: .order, startsGuided: true))
+                } else if let stage = planetDesignPreviewStage {
                     PlanetDesignPreview(stage: stage, characterID: planetDesignPreviewCharacter)
                 } else if TrailerRuntime.isExporting {
                     TrailerExportHost()

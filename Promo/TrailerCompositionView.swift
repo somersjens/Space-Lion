@@ -913,7 +913,7 @@ private final class TrailerExporter {
                                              at: .zero)
 
         var parameters: [AVMutableAudioMixInputParameters] = []
-        if let musicURL = Bundle.main.url(forResource: "background_music", withExtension: "mp3") {
+        if let musicURL = Bundle.main.url(forResource: "background_music", withExtension: "m4a") {
             let musicAsset = AVURLAsset(url: musicURL)
             if let musicSource = try await musicAsset.loadTracks(withMediaType: .audio).first,
                let musicTrack = composition.addMutableTrack(withMediaType: .audio,

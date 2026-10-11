@@ -1,6 +1,69 @@
 import SwiftUI
+import Combine
 #if canImport(UIKit)
 import UIKit
+#endif
+
+#if DEBUG && canImport(UIKit)
+/// Opt-in main-run-loop pacing probe. This measures callback gaps, not GPU
+/// presentation FPS; Instruments on a real device remains the final check.
+private final class SpaceFrameProbe: NSObject {
+    static let shared = SpaceFrameProbe()
+    private var link: CADisplayLink?
+    private var previous: CFTimeInterval?
+    private var started: CFTimeInterval = 0
+    private var gaps: [Double] = []
+    private var missedBudgets = 0
+    private var phase = "intro"
+
+    func mark(_ phase: String) {
+        guard link != nil, self.phase != phase else { return }
+        report()
+        self.phase = phase
+        previous = nil
+    }
+
+    func start() {
+        guard ProcessInfo.processInfo.arguments.contains("--performance-log"), link == nil else { return }
+        previous = nil
+        started = CACurrentMediaTime()
+        gaps.removeAll(keepingCapacity: true)
+        missedBudgets = 0
+        let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    func stop() {
+        if !gaps.isEmpty { report() }
+        link?.invalidate()
+        link = nil
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let now = CACurrentMediaTime()
+        guard UIApplication.shared.applicationState == .active else { previous = nil; return }
+        defer { previous = now }
+        if let previous {
+            let gap = now - previous
+            gaps.append(gap * 1_000)
+            let budget = max(1.0 / 120, link.targetTimestamp - link.timestamp)
+            if gap > budget * 1.5 { missedBudgets += 1 }
+        }
+        if now - started >= 10 { report() }
+    }
+
+    private func report() {
+        guard !gaps.isEmpty else { return }
+        let sorted = gaps.sorted()
+        let p95 = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+        NSLog("%@", String(format: "SPACE_PERF phase=%@ callbacks=%d p95_ms=%.2f max_ms=%.2f missed_budgets=%d",
+                     phase, gaps.count, p95, sorted.last ?? 0, missedBudgets))
+        started = CACurrentMediaTime()
+        gaps.removeAll(keepingCapacity: true)
+        missedBudgets = 0
+    }
+}
 #endif
 
 /// Decorative motion should never compete with input or the character flight.
@@ -20,6 +83,8 @@ private enum SpaceAnimationBudget {
     // updates per second keeps its slow post-flip settle and weightless drift
     // visually continuous; constrained devices still get a stable 20 fps.
     static var characterInterval: TimeInterval { isConstrained ? 1.0 / 20.0 : 1.0 / 30.0 }
+    /// Fast forward travel needs a separate sampling budget from idle poses.
+    static var journeyInterval: TimeInterval { isConstrained ? 1.0 / 30.0 : 1.0 / 60.0 }
     static var sceneryInterval: TimeInterval { isConstrained ? 1.0 / 5.0 : 1.0 / 8.0 }
     static var glassInterval: TimeInterval { isConstrained ? 1.0 / 3.0 : 1.0 / 6.0 }
     /// The boundary LEDs are only a few dashed strokes, so they can update
@@ -39,6 +104,26 @@ private enum LionMotionPhase: Equatable {
     case pushingOff
     case travellingHome
     case settling
+}
+
+/// Ambient layers share a pausable clock, so every reflection, rock and light
+/// resumes from its actual position instead of jumping to a new wall-clock phase.
+private struct SpaceSceneClock: Equatable {
+    private var stored: TimeInterval = 0
+    private var startedAt: Date?
+
+    func time(at date: Date) -> TimeInterval {
+        stored + (startedAt.map { max(0, date.timeIntervalSince($0)) } ?? 0)
+    }
+
+    mutating func setRunning(_ running: Bool, at date: Date = Date()) {
+        if running, startedAt == nil {
+            startedAt = date
+        } else if !running, startedAt != nil {
+            stored = time(at: date)
+            startedAt = nil
+        }
+    }
 }
 
 /// Semantic names for one character's eight-frame sheet. Frame 4 is supplied
@@ -72,16 +157,24 @@ private enum LionPose: CaseIterable {
 /// every gameplay pose while the menu is idle prevents the first answer from
 /// paying a PNG decode in the middle of the lion's flight. The lock only guards
 /// a tiny dictionary swap/read; decoding stays entirely on a background queue.
-private final class LionPoseImageCache: @unchecked Sendable {
+private final class LionPoseImageCache: ObservableObject, @unchecked Sendable {
     static let shared = LionPoseImageCache()
+    @Published private(set) var revision = 0
 
     private let lock = NSLock()
-    private var images: [String: UIImage] = [:]
+    private let images: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.totalCostLimit = 48 * 1_024 * 1_024
+        cache.countLimit = 40
+        return cache
+    }()
     private var requested: Set<String> = []
 
     func prepare(names: [String]) {
         lock.lock()
-        let missing = names.filter { !requested.contains($0) }
+        let missing = names.filter {
+            !requested.contains($0) && images.object(forKey: $0 as NSString) == nil
+        }
         missing.forEach { requested.insert($0) }
         lock.unlock()
         guard !missing.isEmpty else { return }
@@ -91,28 +184,40 @@ private final class LionPoseImageCache: @unchecked Sendable {
             for name in missing {
                 autoreleasepool {
                     guard let source = UIImage(named: name) else { return }
+                    let isRock = name.hasPrefix("space_asteroid_")
+                    let ratio = isRock ? min(1, 512 / max(source.size.width, source.size.height)) : 1
+                    let size = CGSize(width: source.size.width * ratio, height: source.size.height * ratio)
                     let format = UIGraphicsImageRendererFormat()
-                    format.scale = source.scale
+                    format.scale = isRock ? 1 : source.scale
                     format.opaque = false
-                    // Rendering at the source size forces decompression now;
-                    // later SwiftUI draws only scale an already-backed bitmap.
-                    let renderer = UIGraphicsImageRenderer(size: source.size, format: format)
-                    prepared[name] = renderer.image { _ in
-                        source.draw(in: CGRect(origin: .zero, size: source.size))
+                    format.preferredRange = .standard
+                    // Materialise a plain bitmap once. The profiler showed
+                    // asset-catalog Deepmap decoding recurring during draws,
+                    // even with preparingForDisplay on the original UIImage.
+                    prepared[name] = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                        source.draw(in: CGRect(origin: .zero, size: size))
                     }
                 }
             }
             guard let self else { return }
             self.lock.lock()
-            self.images.merge(prepared) { _, new in new }
+            for (name, image) in prepared {
+                let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+                self.images.setObject(image, forKey: name as NSString, cost: cost)
+            }
+            missing.forEach { self.requested.remove($0) }
             self.lock.unlock()
+            // A static Canvas may already have captured Image(name) before
+            // this decode finished. Replace that display list once with the
+            // prepared bitmap; otherwise it keeps the compressed fallback.
+            DispatchQueue.main.async { self.revision &+= 1 }
         }
     }
 
     func image(named name: String) -> UIImage? {
         lock.lock()
         defer { lock.unlock() }
-        return images[name]
+        return images.object(forKey: name as NSString)
     }
 }
 #endif
@@ -132,8 +237,8 @@ private enum SpaceDestinationArt {
 
     static func image(named name: String) -> Image {
 #if canImport(UIKit)
-        if let prepared = LionPoseImageCache.shared.image(named: name) {
-            return Image(uiImage: prepared)
+        if let prepared = LionPoseImageCache.shared.image(named: name), let bitmap = prepared.cgImage {
+            return Image(decorative: bitmap, scale: prepared.scale)
         }
 #endif
         return Image(name)
@@ -219,20 +324,16 @@ private enum SpaceAsteroidField {
             let y = window.minY + (family.y + rock.offset.y + sway) * window.height
             let radius = window.height * rock.radius
             let distanceToFocus = abs(rock.depth - 0.54) / 0.46
-            // A continuous, gentle falloff preserves the surface detail in
-            // near rocks. There is no binary sharp/very-blurred depth switch.
-            // Focus depends on distance, not sprite size: small companions
-            // in the same family must not appear sharper just because they
-            // have a smaller silhouette.
             let blur = min(1.35, window.height * 0.004) * pow(distanceToFocus, 1.6)
-            context.drawLayer { stone in
-                if blur > 0.04 { stone.addFilter(.blur(radius: blur)) }
-                stone.opacity *= Double(0.83 + rock.depth * 0.13)
-                stone.translateBy(x: x, y: y)
-                stone.rotate(by: .radians(rock.rotation + time * (0.005 + Double(rock.family) * 0.001)))
-                stone.draw(art[rock.asset], in: CGRect(x: -radius, y: -radius,
-                                                     width: radius * 2, height: radius * 2))
-            }
+            // Each rock is one image. A full drawing layer per rock forced
+            // twelve offscreen composites per scenery tick for no grouping.
+            var stone = context
+            if blur > 0.04 { stone.addFilter(.blur(radius: blur)) }
+            stone.opacity *= Double(0.83 + rock.depth * 0.13)
+            stone.translateBy(x: x, y: y)
+            stone.rotate(by: .radians(rock.rotation + time * (0.005 + Double(rock.family) * 0.001)))
+            stone.draw(art[rock.asset], in: CGRect(x: -radius, y: -radius,
+                                                 width: radius * 2, height: radius * 2))
         }
     }
 }
@@ -263,6 +364,8 @@ struct SpaceLionPlayfield: View {
     let leftReserve: CGFloat
     let rightReserve: CGFloat
     var tutorial: TutorialPlan = TutorialPlan()
+    /// Shared louver travel, 0 open and 1 shut, so the stones match the sum.
+    var hatchProgress: CGFloat = 0
     var tutorialMessage: String? = nil
     var onTutorialEvent: (TutorialEvent) -> Void = { _ in }
     let onHit: (UUID, Bool, Bool) -> Bool
@@ -299,6 +402,18 @@ struct SpaceLionPlayfield: View {
     @State private var travelShakePhase: CGFloat = 0
     @State private var displayedDestinationStage: Int?
     @State private var journeyOriginStage: Int?
+    @State private var sceneClock = SpaceSceneClock()
+#if canImport(UIKit)
+    @ObservedObject private var artwork = LionPoseImageCache.shared
+#endif
+
+    private var artworkRevision: Int {
+#if canImport(UIKit)
+        artwork.revision
+#else
+        0
+#endif
+    }
 
     /// Decode the selected poses, opening world and rock sprites while the
     /// menu is idle, before the gameplay animation needs them.
@@ -336,9 +451,12 @@ struct SpaceLionPlayfield: View {
                                  character: character,
                                  isPad: isPad,
                                  isRunning: runsAmbientMotion,
+                                 sceneClock: sceneClock,
                                  destinationStage: displayedDestinationStage ?? initialDestinationStage,
                                  isTravelling: isTravelling,
-                                 feedbacks: cockpitFeedbacks)
+                                 feedbacks: cockpitFeedbacks,
+                                 artworkRevision: artworkRevision)
+                    .equatable()
 
                 if isTravelling {
                     SpaceForwardJourney(window: metrics.cockpit.windowRect,
@@ -391,7 +509,8 @@ struct SpaceLionPlayfield: View {
                 SpaceViewportGlass(window: metrics.cockpit.windowRect,
                                    cut: min(metrics.cockpit.windowRect.width,
                                             metrics.cockpit.windowRect.height) * 0.11,
-                                   isRunning: runsAmbientMotion)
+                                   isRunning: runsAmbientMotion,
+                                   sceneClock: sceneClock)
 
                 if let tutorialMessage, tutorial.isRunning {
                     Text(tutorialMessage)
@@ -413,18 +532,46 @@ struct SpaceLionPlayfield: View {
             .clipped()
             .contentShape(Rectangle())
             .onAppear {
+#if DEBUG && canImport(UIKit)
+                SpaceFrameProbe.shared.start()
+#endif
+                sceneClock.setRunning(runsAmbientMotion)
                 displayedDestinationStage = initialDestinationStage
                 if isTravelling { journeyOriginStage = max(1, destinationStage - 1) }
                 SpaceDestinationArt.prepare(stage: destinationStage, characterID: character.id)
                 if playsFishEntrance { beginEntrance(metrics: metrics) }
             }
+            .onDisappear {
+#if DEBUG && canImport(UIKit)
+                SpaceFrameProbe.shared.stop()
+#endif
+            }
             .onChange(of: playsFishEntrance) { _, value in
                 if value { beginEntrance(metrics: metrics) }
             }
+            .onChange(of: runsAmbientMotion) { _, value in
+                sceneClock.setRunning(value)
+#if DEBUG && canImport(UIKit)
+                SpaceFrameProbe.shared.mark(value ? "play" : "paused")
+#endif
+            }
+#if DEBUG
+            .task(id: automatedAnswerOpportunity) {
+                guard automatedAnswerOpportunity != nil, let round,
+                      let index = round.options.firstIndex(where: \.isCorrect) else { return }
+                do { try await Task.sleep(for: .milliseconds(400)) }
+                catch { return }
+                select(round.options[index], at: metrics.answerPoints[index],
+                       from: metrics.centre, lionSize: metrics.lionSize)
+            }
+#endif
             .onChange(of: playsLevelCompletion) { _, value in
                 if value { beginCompletion(width: metrics.size.width) }
             }
             .onChange(of: isTravelling) { _, value in
+#if DEBUG && canImport(UIKit)
+                SpaceFrameProbe.shared.mark(value ? "journey" : "play")
+#endif
                 if value {
                     journeyOriginStage = displayedDestinationStage ?? max(1, destinationStage - 1)
                     withAnimation(.linear(duration: GameConfig.stageTravelDuration)) {
@@ -444,6 +591,17 @@ struct SpaceLionPlayfield: View {
         .ignoresSafeArea()
     }
 
+#if DEBUG
+    /// Exercises real character flights and callbacks, rather than jumping the
+    /// model directly to its next question. Only enabled by the audit flag.
+    private var automatedAnswerOpportunity: UUID? {
+        guard ProcessInfo.processInfo.arguments.contains("--performance-autoplay"),
+              isLive, isRunning, !isMoving, !tutorial.blocksAnswers,
+              !playsLevelCompletion else { return nil }
+        return round?.id
+    }
+#endif
+
     private var initialDestinationStage: Int {
         if isTravelling, (journeyPreviewProgress ?? 0) < 0.68 {
             return max(1, destinationStage - 1)
@@ -461,26 +619,32 @@ struct SpaceLionPlayfield: View {
         let feedback = feedback(for: option)
         // Depress the arcade cap while the lion is pressing into it.
         let isPressed = isSelected && (buttonHasContact || buttonImpactScale < 0.98)
-        return Button {
-            select(option,
-                   at: point,
-                   from: centre,
-                   lionSize: lionSize)
-        } label: {
-            SpaceConsoleButton(text: option.text,
-                               size: size,
-                               accentColor: character.color,
-                               feedback: feedback,
-                               isPressed: isPressed)
+        return ZStack {
+            Button {
+                select(option,
+                       at: point,
+                       from: centre,
+                       lionSize: lionSize)
+            } label: {
+                SpaceConsoleButton(text: option.text,
+                                   size: size,
+                                   accentColor: character.color,
+                                   feedback: feedback,
+                                   isPressed: isPressed)
+            }
+            .buttonStyle(SpaceAnswerPressStyle())
+            .hoverEffect(.highlight)
+            .disabled(!isLive || isMoving || tutorial.blocksAnswers || playsLevelCompletion)
+            .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [])
+            .accessibilityLabel(Text(verbatim: option.text))
+            .accessibilityHint(Text(verbatim: "Answer \(index + 1)"))
+            .accessibilityIdentifier("space-lion-answer-\(option.text)")
+
+            CockpitLouverHatch(progress: hatchProgress)
+                .frame(width: size, height: size)
+                .clipShape(SpaceModuleShape(cut: size * 0.23))
         }
-        .buttonStyle(SpaceAnswerPressStyle())
-        .hoverEffect(.highlight)
         .position(point)
-        .disabled(!isLive || isMoving || tutorial.blocksAnswers || playsLevelCompletion)
-        .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [])
-        .accessibilityLabel(Text(verbatim: option.text))
-        .accessibilityHint(Text(verbatim: "Answer \(index + 1)"))
-        .accessibilityIdentifier("space-lion-answer-\(option.text)")
         .transition(.opacity.combined(with: .scale(scale: 0.88)))
     }
 
@@ -497,7 +661,7 @@ struct SpaceLionPlayfield: View {
         // per second.
         TimelineView(.animation(minimumInterval: SpaceAnimationBudget.characterInterval,
                                 paused: !isRunning || reduceMotion)) { timeline in
-            let time = timeline.date.timeIntervalSinceReferenceDate
+            let time = sceneClock.time(at: timeline.date)
             let driftX = reduceMotion
                 ? 0
                 : sin(time * 0.62) * metrics.lionSize * 0.075 * driftAmount
@@ -555,8 +719,10 @@ struct SpaceLionPlayfield: View {
     private func lionImage(_ pose: LionPose, size: CGFloat) -> some View {
         let name = poseAssetName(pose)
 #if canImport(UIKit)
-        let image = LionPoseImageCache.shared.image(named: name)
-            .map(Image.init(uiImage:)) ?? Image(name)
+        let image = LionPoseImageCache.shared.image(named: name).flatMap { prepared -> Image? in
+            guard let bitmap = prepared.cgImage else { return nil }
+            return Image(decorative: bitmap, scale: prepared.scale)
+        } ?? Image(name)
         image
             .resizable()
             .scaledToFit()
@@ -887,7 +1053,7 @@ struct SpaceLionPlayfield: View {
 
     private func rawIdleRotation(at date: Date) -> Double {
         guard !reduceMotion else { return 0 }
-        let time = date.timeIntervalSinceReferenceDate
+        let time = sceneClock.time(at: date)
         // A slow weightless sway. The face stays readable; the full turn is
         // reserved for the happy flip after a correct answer.
         return sin(time * 0.42) * 10 + sin(time * 0.17) * 4
@@ -1224,7 +1390,7 @@ private func cockpitWrap(_ value: Double) -> Double {
 
 /// Where the cockpit's fixed structure sits, so the painted bays line up
 /// exactly with the interactive buttons laid over them.
-private struct CockpitLayout {
+private struct CockpitLayout: Equatable {
     let windowRect: CGRect
     let ceilingJointY: CGFloat
     let floorTop: CGFloat
@@ -1587,6 +1753,7 @@ private struct SpaceViewportGlass: View {
     let window: CGRect
     let cut: CGFloat
     let isRunning: Bool
+    let sceneClock: SpaceSceneClock
 
     var body: some View {
         // A reflection crossing the glass is deliberately slow. Eight samples
@@ -1594,9 +1761,7 @@ private struct SpaceViewportGlass: View {
         // clip pass on every display frame.
         TimelineView(.animation(minimumInterval: SpaceAnimationBudget.glassInterval,
                                 paused: !isRunning)) { timeline in
-            let travel = isRunning
-                ? cockpitWrap(timeline.date.timeIntervalSinceReferenceDate * 0.06)
-                : 0.22
+            let travel = cockpitWrap(sceneClock.time(at: timeline.date) * 0.06)
             ZStack {
                 LinearGradient(colors: [.white.opacity(0.09), .white.opacity(0.02), .clear],
                                startPoint: .top,
@@ -1656,12 +1821,10 @@ private struct SpaceForwardJourney: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: SpaceAnimationBudget.characterInterval,
+        TimelineView(.animation(minimumInterval: SpaceAnimationBudget.journeyInterval,
                                 paused: previewProgress != nil)) { timeline in
             let progress = min(1, max(0, previewProgress ?? CGFloat(
                 timeline.date.timeIntervalSince(startedAt) / GameConfig.stageTravelDuration)))
-            let badgeOpacity = ramp(progress, from: 0.08, to: 0.22)
-                * (1 - ramp(progress, from: 0.76, to: 0.94))
             Canvas { context, size in
                 let pane = CGRect(origin: .zero, size: size)
                 let cut = min(size.width, size.height) * 0.11
@@ -1671,25 +1834,6 @@ private struct SpaceForwardJourney: View {
                 drawFlight(in: context, pane: pane, progress: progress,
                            sceneryTime: previewProgress == nil && !reduceMotion
                                ? timeline.date.timeIntervalSinceReferenceDate : 0)
-            }
-            .overlay(alignment: .top) {
-                HStack(spacing: isPad ? 12 : 8) {
-                    Text(verbatim: "\(previousStage)")
-                        .foregroundStyle(.white.opacity(0.7))
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: isPad ? 13 : 10, weight: .bold))
-                    Image(systemName: (stage - 1) % 5 == 4 ? "sparkles" : "globe")
-                    Text(verbatim: "\(stage)")
-                }
-                .font(.system(size: isPad ? 21 : 15, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(arrivalColor)
-                .padding(.horizontal, isPad ? 20 : 15)
-                .padding(.vertical, isPad ? 10 : 7)
-                .background(Color(red: 0.025, green: 0.04, blue: 0.10).opacity(0.82), in: Capsule())
-                .overlay(Capsule().stroke(arrivalColor.opacity(0.4), lineWidth: 1))
-                .padding(.top, window.height * 0.08)
-                .opacity(Double(badgeOpacity))
             }
             .onChange(of: progress >= 0.68) { _, hasArrived in
                 if hasArrived { onArrival() }
@@ -1864,7 +2008,33 @@ private struct VictoryBloom: View {
 /// The cockpit interior: a roof under the HUD, two button columns, a large
 /// chamfered windshield onto a nebula and a planet, and a perspective floor
 /// with a teleporter pad. Everything is drawn from paths and gradients.
-private struct SpaceshipCockpit: View {
+private struct SpaceshipCockpit: View, Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.layout == rhs.layout && lhs.character == rhs.character && lhs.isPad == rhs.isPad
+            && lhs.isRunning == rhs.isRunning && lhs.destinationStage == rhs.destinationStage
+            && lhs.isTravelling == rhs.isTravelling && lhs.feedbacks == rhs.feedbacks
+            && lhs.sceneClock == rhs.sceneClock
+            && lhs.artworkRevision == rhs.artworkRevision
+    }
+
+    /// Feedback and animation state cannot invalidate the expensive hull.
+    private struct StaticLayer: View, Equatable {
+        let cockpit: SpaceshipCockpit
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.cockpit.layout == rhs.cockpit.layout
+                && lhs.cockpit.character == rhs.cockpit.character
+                && lhs.cockpit.isPad == rhs.cockpit.isPad
+                && lhs.cockpit.destinationStage == rhs.cockpit.destinationStage
+                && lhs.cockpit.artworkRevision == rhs.cockpit.artworkRevision
+        }
+
+        var body: some View {
+            Canvas(opaque: true, rendersAsynchronously: true) { context, size in
+                cockpit.drawStatic(in: context, size: size)
+            }
+        }
+    }
     private struct StarSample {
         let depth: CGFloat
         let x: CGFloat
@@ -1876,9 +2046,11 @@ private struct SpaceshipCockpit: View {
     let character: AnimalCharacter
     let isPad: Bool
     let isRunning: Bool
+    let sceneClock: SpaceSceneClock
     let destinationStage: Int
     let isTravelling: Bool
     let feedbacks: [HoopFeedback]
+    let artworkRevision: Int
 
     private let cyan = Color(red: 0.20, green: 0.82, blue: 1.00)
     private let blue = Color(red: 0.08, green: 0.34, blue: 0.95)
@@ -1902,12 +2074,11 @@ private struct SpaceshipCockpit: View {
         ZStack {
             // The hull, destination artwork and control sockets remain in a
             // static canvas while only glints, stones and lights animate.
-            Canvas(opaque: true, rendersAsynchronously: true) { context, size in
-                drawStatic(in: context, size: size)
-            }
+            StaticLayer(cockpit: self)
+                .equatable()
 
             // These lamps only change when answer feedback changes. Keeping
-            // them outside the scenery clock avoids rebuilding 64 radial
+            // them outside the scenery clock avoids rebuilding 48 radial
             // gradients on every decorative animation tick.
             Canvas { context, _ in
                 drawFeedbackLights(in: context)
@@ -1918,7 +2089,10 @@ private struct SpaceshipCockpit: View {
             // animation paths, so neither needs to inherit this low cadence.
             TimelineView(.animation(minimumInterval: SpaceAnimationBudget.sceneryInterval,
                                     paused: !isRunning)) { timeline in
-                let time = isRunning ? timeline.date.timeIntervalSinceReferenceDate : 0
+                // Keep the live clock when the view redraws for pause. Sending
+                // the rocks back to time zero made them jump the moment the
+                // pause card appeared.
+                let time = sceneClock.time(at: timeline.date)
                 Canvas(rendersAsynchronously: true) { context, size in
                     drawAnimated(in: context, size: size, time: time)
                 }
@@ -1929,7 +2103,7 @@ private struct SpaceshipCockpit: View {
             // 30-fps redraw of the nebula, asteroids and cockpit effects.
             TimelineView(.animation(minimumInterval: SpaceAnimationBudget.ledInterval,
                                     paused: !isRunning)) { timeline in
-                let time = timeline.date.timeIntervalSinceReferenceDate
+                let time = sceneClock.time(at: timeline.date)
                 Canvas { context, size in
                     drawBoundaryLightChains(
                         in: context,
@@ -2043,8 +2217,8 @@ private struct SpaceshipCockpit: View {
 
         // Small glints and textured rocks move above the static destination
         // artwork; the full scene is never repainted by this animation clock.
-        context.drawLayer { space in
-            space.opacity = isTravelling ? 0 : 1
+        if !isTravelling {
+            var space = context
             space.clip(to: chamfered(sceneryWindow, cut: sceneryCut))
             drawStars(in: space, window: sceneryWindow, time: time)
             if destination != 5 {
@@ -2133,16 +2307,15 @@ private struct SpaceshipCockpit: View {
                                   width: span,
                                   height: thickness * 6)
 
-            context.drawLayer { rail in
-                rail.clip(to: Path(clipRect))
-                drawEnergyBar(in: rail,
-                              centre: centre,
-                              length: length,
-                              thickness: thickness,
-                              vertical: false,
-                              color: cyan,
-                              opacity: 0.78)
-            }
+            var rail = context
+            rail.clip(to: Path(clipRect))
+            drawEnergyBar(in: rail,
+                          centre: centre,
+                          length: length,
+                          thickness: thickness,
+                          vertical: false,
+                          color: cyan,
+                          opacity: 0.78)
         }
     }
 
@@ -2213,57 +2386,55 @@ private struct SpaceshipCockpit: View {
                                     y: topY - thickness * 4,
                                     width: window.width,
                                     height: bottomY - topY + thickness * 8)
-        context.drawLayer { rails in
-            rails.clip(to: Path(horizontalClip))
+        var horizontalRails = context
+        horizontalRails.clip(to: Path(horizontalClip))
 
-            let topX = window.minX - horizontalLength * 0.5
-                + (window.width + horizontalLength) * topProgress
-            drawEnergyBar(in: rails,
-                          centre: CGPoint(x: topX, y: topY),
-                          length: horizontalLength,
-                          thickness: thickness,
-                          vertical: false,
-                          color: cyan,
-                          opacity: 0.78)
+        let topX = window.minX - horizontalLength * 0.5
+            + (window.width + horizontalLength) * topProgress
+        drawEnergyBar(in: horizontalRails,
+                      centre: CGPoint(x: topX, y: topY),
+                      length: horizontalLength,
+                      thickness: thickness,
+                      vertical: false,
+                      color: cyan,
+                      opacity: 0.78)
 
-            let bottomX = window.minX - horizontalLength * 0.5
-                + (window.width + horizontalLength) * bottomProgress
-            drawEnergyBar(in: rails,
-                          centre: CGPoint(x: bottomX, y: bottomY),
-                          length: horizontalLength * 0.86,
-                          thickness: thickness,
-                          vertical: false,
-                          color: orange,
-                          opacity: 0.72)
-        }
+        let bottomX = window.minX - horizontalLength * 0.5
+            + (window.width + horizontalLength) * bottomProgress
+        drawEnergyBar(in: horizontalRails,
+                      centre: CGPoint(x: bottomX, y: bottomY),
+                      length: horizontalLength * 0.86,
+                      thickness: thickness,
+                      vertical: false,
+                      color: orange,
+                      opacity: 0.72)
 
         let verticalClip = CGRect(x: leftX - thickness * 4,
                                   y: window.minY,
                                   width: rightX - leftX + thickness * 8,
                                   height: window.height)
-        context.drawLayer { rails in
-            rails.clip(to: Path(verticalClip))
+        var verticalRails = context
+        verticalRails.clip(to: Path(verticalClip))
 
-            let leftY = window.minY - verticalLength * 0.5
-                + (window.height + verticalLength) * leftProgress
-            drawEnergyBar(in: rails,
-                          centre: CGPoint(x: leftX, y: leftY),
-                          length: verticalLength,
-                          thickness: thickness,
-                          vertical: true,
-                          color: cyan,
-                          opacity: 0.66)
+        let leftY = window.minY - verticalLength * 0.5
+            + (window.height + verticalLength) * leftProgress
+        drawEnergyBar(in: verticalRails,
+                      centre: CGPoint(x: leftX, y: leftY),
+                      length: verticalLength,
+                      thickness: thickness,
+                      vertical: true,
+                      color: cyan,
+                      opacity: 0.66)
 
-            let rightY = window.minY - verticalLength * 0.5
-                + (window.height + verticalLength) * rightProgress
-            drawEnergyBar(in: rails,
-                          centre: CGPoint(x: rightX, y: rightY),
-                          length: verticalLength,
-                          thickness: thickness,
-                          vertical: true,
-                          color: cyan,
-                          opacity: 0.66)
-        }
+        let rightY = window.minY - verticalLength * 0.5
+            + (window.height + verticalLength) * rightProgress
+        drawEnergyBar(in: verticalRails,
+                      centre: CGPoint(x: rightX, y: rightY),
+                      length: verticalLength,
+                      thickness: thickness,
+                      vertical: true,
+                      color: cyan,
+                      opacity: 0.66)
     }
 
     /// Paints one soft-edged power segment with a narrow white-hot centre.

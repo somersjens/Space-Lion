@@ -41,6 +41,7 @@ import Foundation
 final class ShuffledCycle {
     private let values: [Int]
     private var remaining: [Int] = []
+    private var cursor = 0
     private var last: Int?
 
     init(_ values: [Int]) {
@@ -49,14 +50,16 @@ final class ShuffledCycle {
 
     func next(_ random: RandomSource) -> Int {
         guard !values.isEmpty else { return 0 }
-        if remaining.isEmpty {
+        if cursor >= remaining.count {
             var lap = random.shuffled(values)
             if lap.count > 1, let last, lap.first == last {
                 lap.swapAt(0, random.int(in: 1...(lap.count - 1)))
             }
             remaining = lap
+            cursor = 0
         }
-        let value = remaining.removeFirst()
+        let value = remaining[cursor]
+        cursor += 1
         last = value
         return value
     }
@@ -83,6 +86,9 @@ public final class QuestionGenerator {
     private var routeStep = 0
     /// The shuffled cycles the Random route runs on, one per purpose.
     private var cycles: [String: ShuffledCycle] = [:]
+    /// Candidate ranges are invariant for a given level and percentage.
+    private var decimalWholeCandidates: [Int: [Int]] = [:]
+    private var sourceWeights: [Double] = []
 
     /// Which operations a Supermix level draws from. Ignored by every other
     /// topic, which has exactly one operation by definition.
@@ -103,6 +109,9 @@ public final class QuestionGenerator {
         self.mode = mode
         self.mixedVariant = mixedVariant
         self.random = random
+        self.sourceWeights = (1...level.index).map {
+            pow(Double($0), GameConfig.levelWeightExponent)
+        }
     }
 
     // MARK: - Public API
@@ -152,7 +161,7 @@ public final class QuestionGenerator {
         }
 
         // Weighted pick over 1...top. Weight of level i is i^exponent.
-        let weights = (1...top).map { pow(Double($0), GameConfig.levelWeightExponent) }
+        let weights = sourceWeights
         let total = weights.reduce(0, +)
         var threshold = random.double(in: 0..<total)
         for (offset, weight) in weights.enumerated() {
@@ -161,7 +170,8 @@ public final class QuestionGenerator {
                 let candidate = offset + 1
                 // Nudge away from a level that just came up three times in a
                 // row, so the mix keeps moving without ever excluding a level.
-                if recentSourceLevels.suffix(3).allSatisfy({ $0 == candidate }), top > 1 {
+                if recentSourceLevels.count >= 3,
+                   recentSourceLevels.suffix(3).allSatisfy({ $0 == candidate }), top > 1 {
                     return candidate == top ? max(1, top - 1) : candidate + 1
                 }
                 return candidate
@@ -706,11 +716,15 @@ public final class QuestionGenerator {
             : Self.percentageBase(percentage) * 8
         let highestWhole = max(1, min(familyCeiling,
                                       DecimalAnswer.maximumHundredths / percentage))
-        var candidates: [Int] = []
-        for whole in 1...highestWhole {
-            let hundredths = whole * percentage
-            guard DecimalAnswer.allowedFractionalParts.contains(hundredths % 100) else { continue }
-            candidates.append(whole)
+        let cacheKey = percentage * 10_000 + highestWhole
+        let candidates: [Int]
+        if let cached = decimalWholeCandidates[cacheKey] {
+            candidates = cached
+        } else {
+            candidates = (1...highestWhole).filter {
+                DecimalAnswer.allowedFractionalParts.contains(($0 * percentage) % 100)
+            }
+            decimalWholeCandidates[cacheKey] = candidates
         }
         guard let whole = random.element(candidates) else { return nil }
 
@@ -804,7 +818,7 @@ public final class QuestionGenerator {
         }
         return MathQuestion(prompt: prompt,
                             correctAnswer: "\(answer)",
-                            distractors: random.shuffled(distractors).map(String.init),
+                            distractors: distractors.map(String.init),
                             sourceLevel: source,
                             kind: kind)
     }
@@ -837,7 +851,7 @@ public final class QuestionGenerator {
         }
         return MathQuestion(prompt: prompt,
                             correctAnswer: DecimalAnswer.text(hundredths: answer),
-                            distractors: random.shuffled(distractors)
+                            distractors: distractors
                                 .map { DecimalAnswer.text(hundredths: $0) },
                             sourceLevel: source,
                             kind: kind)
@@ -905,7 +919,7 @@ public final class QuestionGenerator {
         }
         return MathQuestion(prompt: prompt,
                             correctAnswer: answer,
-                            distractors: random.shuffled(distractors),
+                            distractors: distractors,
                             sourceLevel: source,
                             kind: kind)
     }

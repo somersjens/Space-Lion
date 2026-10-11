@@ -31,8 +31,10 @@ final class AppAudio: NSObject, ObservableObject {
                 prepare()
                 activateSession()
             } else {
+                pendingSessionStartDeadline = nil
                 stopEngine()
                 deactivateSessionIfUnused()
+                finishPendingEntrance()
             }
         }
     }
@@ -65,8 +67,8 @@ final class AppAudio: NSObject, ObservableObject {
     /// pool of `AVAudioPlayer`s. The render graph stays up for the whole
     /// session, so firing an effect is just "schedule a preloaded PCM buffer on
     /// a node" — no per-play decode, no audio-session touch and no graph rebuild
-    /// to land in the same frame as SpriteKit. Because the graph never tears
-    /// down, an audio-route change can no longer stall them.
+    /// during normal gameplay. Interruptions and output-route changes can
+    /// still require the engine to restart.
     private let engine = AVAudioEngine()
     /// One player node per effect, kept in its always-on "playing" state so a
     /// trigger is a single cheap `scheduleBuffer(.interrupts)` on the node.
@@ -88,12 +90,8 @@ final class AppAudio: NSObject, ObservableObject {
         /// sound fires immediately (measured per file; no re-encoding needed).
         let lead: TimeInterval
     }
-    // Most of these are shipped as uncompressed CAF/PCM, converted from the
-    // originals without touching their sample rate, channels or timing — which
-    // is why their `volume`/`lead` have never had to change. The three `wav`
-    // files were already PCM.
-    //
-    // New effects are trimmed mono AAC. Every effect is decoded into a PCM
+    // CAF is a container; some of the CAF assets contain AAC as well. New
+    // effects are trimmed mono AAC. Every effect is decoded into a PCM
     // buffer once in `prepare()` and only ever scheduled from memory afterwards,
     // so the compact files reduce the app download without adding work to a
     // gameplay frame. Their silence is removed in the assets themselves.
@@ -140,7 +138,8 @@ final class AppAudio: NSObject, ObservableObject {
     private var sessionActive = false
     /// The music loops continuously: softly in the background on the menus and
     /// cards, a little louder during play, and briefly ducked while a sum is
-    /// read so the words stay clearly audible over it. Keep these values in dB
+    /// read so the words stay clearly audible over it. The file is mastered to
+    /// about -14 LUFS; these gains sit on top of that. Keep the values in dB
     /// so the intended perceived loudness is explicit; AVAudioPlayer itself
     /// expects a linear gain.
     private let menuMusicVolume: Float = pow(10, -26.0 / 20.0)
@@ -159,6 +158,11 @@ final class AppAudio: NSObject, ObservableObject {
     /// actually switched on (see `loadMusicPlayerIfNeeded`).
     private var musicLoadStarted = false
     private var wantsMusicPlayback = false
+    /// Only the entrance cue may wait for a cold engine. Short-lived answer
+    /// effects must never be replayed after their visual moment has passed.
+    private var pendingSessionStartDeadline: TimeInterval?
+    private var sessionStartRequestedAt: TimeInterval?
+    private var pendingEntrance: (id: UUID, action: () -> Void)?
     /// Audio output waits very briefly after activating the hardware session.
     /// Starting the engine and MP3 decoder in the same instant as that hardware
     /// transition is what can produce a one-off crack on a cold app launch.
@@ -172,6 +176,7 @@ final class AppAudio: NSObject, ObservableObject {
     /// two-second fade made successfully prepared music feel late.
     private let coldMusicFadeDuration: TimeInterval = 0.65
     private let prepareQueue = DispatchQueue(label: "com.elephantchallenge.audio.prepare", qos: .userInitiated)
+    private let musicPrepareQueue = DispatchQueue(label: "com.elephantchallenge.audio.music", qos: .utility)
 
 
     private override init() {
@@ -195,9 +200,40 @@ final class AppAudio: NSObject, ObservableObject {
         musicEnabled.toggle()
     }
 
+    /// Synchronise the visible entrance with the prepared output on a cold
+    /// launch. Normal starts run immediately; a failed audio route cannot hold
+    /// gameplay indefinitely. The caller can cancel when leaving the screen.
+    @discardableResult
+    func whenEffectsReady(_ action: @escaping () -> Void) -> UUID? {
+        if !gameSoundsEnabled || (sessionOutputReady && engine.isRunning) {
+            action()
+            return nil
+        }
+        let id = UUID()
+        pendingEntrance = (id, action)
+        prepare()
+        activateSession()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self, self.pendingEntrance?.id == id else { return }
+            self.finishPendingEntrance()
+        }
+        return pendingEntrance?.id == id ? id : nil
+    }
+
+    func cancelEntrance(_ id: UUID?) {
+        guard let id, pendingEntrance?.id == id else { return }
+        pendingEntrance = nil
+    }
+
+    private func finishPendingEntrance() {
+        let action = pendingEntrance?.action
+        pendingEntrance = nil
+        action?()
+    }
+
     // MARK: - Preparation (called once, up front)
 
-    /// Loads every player and resolves installed voices on a background queue.
+    /// Loads the enabled music and effect resources on background queues.
     /// Cheap to call repeatedly; only the first call works.
     /// The heavy, blocking bits — file decode, `prepareToPlay`, session
     /// activation — happen here, at a calm moment, not mid-game.
@@ -212,14 +248,16 @@ final class AppAudio: NSObject, ObservableObject {
         // `preparationStarted` is deliberately left false, so turning a switch
         // back on still prepares everything.
         guard hasAnyAudioEnabled else { return }
-        guard !preparationStarted else { return }
-        preparationStarted = true
         // Put our own category in place before the first player exists, so an
         // implicit activation can never land on the solo default.
         configureSessionIfNeeded()
         // The music file is loaded separately, and only when the music is
         // actually switched on (see the method).
         loadMusicPlayerIfNeeded()
+        // Music-only sessions never need to decode or attach the effect graph.
+        // Turning effects on later still enters this one-time preparation.
+        guard gameSoundsEnabled, !preparationStarted else { return }
+        preparationStarted = true
         prepareQueue.async { [weak self] in
             guard let self else { return }
             // Decode + lead-trim every effect into a ready-to-schedule PCM buffer
@@ -293,10 +331,10 @@ final class AppAudio: NSObject, ObservableObject {
         musicLoadStarted = true
         // The category (solo, since the music is on) before the hardware.
         configureSessionIfNeeded()
-        prepareQueue.async { [weak self] in
+        musicPrepareQueue.async { [weak self] in
             // AVAudioPlayer's endless loop keeps this single compressed music
             // asset in memory without repeatedly loading or creating players.
-            let music = Self.makePlayer(named: "background_music", ext: "mp3",
+            let music = Self.makePlayer(named: "background_music", ext: "m4a",
                                         loops: -1, volume: 0)
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -352,6 +390,13 @@ final class AppAudio: NSObject, ObservableObject {
         engine.prepare()
         guard (try? engine.start()) != nil else { return }
         for node in effectNodes.values { node.play() }
+        finishPendingEntrance()
+        if let deadline = pendingSessionStartDeadline {
+            pendingSessionStartDeadline = nil
+            if ProcessInfo.processInfo.systemUptime <= deadline {
+                playEffect("sessionStart")
+            }
+        }
     }
 
     /// Stops the effect nodes and the engine (used when going silent or
@@ -380,7 +425,12 @@ final class AppAudio: NSObject, ObservableObject {
         // and the single in-app switch is the real mute control. `.mixWithOthers`
         // is added only when the game's own music is off, so another app's
         // music keeps playing underneath the game's effects.
-        try? session.setCategory(.playback, mode: .default, options: options)
+        do {
+            try session.setCategory(.playback, mode: .default, options: options)
+            // A preference, not a guarantee: routes such as Bluetooth choose
+            // their own latency. Apply before activation to avoid restarting it.
+            if !sessionActive { try? session.setPreferredIOBufferDuration(0.005) }
+        } catch { return }
         appliedCategoryOptions = options
     }
 
@@ -402,7 +452,8 @@ final class AppAudio: NSObject, ObservableObject {
             return
         }
         configureSessionIfNeeded()
-        try? AVAudioSession.sharedInstance().setActive(true)
+        do { try AVAudioSession.sharedInstance().setActive(true) }
+        catch { return }
         sessionActive = true
         sessionOutputReady = false
         musicOutputReady = false
@@ -427,6 +478,7 @@ final class AppAudio: NSObject, ObservableObject {
     }
 
     private func deactivateSession() {
+        pendingSessionStartDeadline = nil
         guard sessionActive else { return }
         sessionStartupToken += 1
         sessionOutputReady = false
@@ -449,6 +501,7 @@ final class AppAudio: NSObject, ObservableObject {
     /// back to the soft menu level afterwards.
     func setGameplayActive(_ active: Bool) {
         isGameplayActive = active
+        if !active { pendingSessionStartDeadline = nil }
         if active {
             if musicEnabled {
                 startMusic()
@@ -534,7 +587,17 @@ final class AppAudio: NSObject, ObservableObject {
     func playCardReveal()       { playEffect("cardReveal") }       // the question becomes visible
     func playDoubleCardAppear() { playEffect("doubleCard") }       // the thick special card
     func playDoubleScore()      { playEffect("doubleScore") }      // a double card paid out
-    func playSessionStart()     { playEffect("sessionStart") }
+    func playSessionStart() {
+        guard gameSoundsEnabled else { return }
+        sessionStartRequestedAt = ProcessInfo.processInfo.systemUptime
+        if !sessionOutputReady || !engine.isRunning {
+            pendingSessionStartDeadline = ProcessInfo.processInfo.systemUptime + 0.5
+            prepare()
+            activateSession()
+        } else {
+            playEffect("sessionStart")
+        }
+    }
     func playSessionComplete()  { playEffect("sessionComplete") }
     func playHighScore()        { playEffect("highScore") }        // new personal best
     func playCharacterUnlock()  { playEffect("characterUnlock") }
@@ -548,12 +611,14 @@ final class AppAudio: NSObject, ObservableObject {
 
     private func playEffect(_ key: String) {
         guard gameSoundsEnabled else { return }
-        prepare()
-        activateSession()
+        if !sessionOutputReady || !engine.isRunning {
+            prepare()
+            activateSession()
+        }
         // Preloaded by `prepare()`. If a sound is somehow needed before that
         // finished (rare — play happens well after launch) it's simply skipped;
         // no synchronous file work is ever done on this hot path.
-        guard sessionOutputReady,
+        guard sessionOutputReady, engine.isRunning,
               let node = effectNodes[key], let buffer = effectBuffers[key] else { return }
         // The node is already running (see `startEngineIfNeeded`); `.interrupts`
         // restarts it from the top with nothing to allocate — the whole trigger
@@ -561,6 +626,16 @@ final class AppAudio: NSObject, ObservableObject {
         // frame. The lead trim and volume are already baked in at load time.
         if !node.isPlaying { node.play() }
         node.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
+#if DEBUG
+        if key == "sessionStart", ProcessInfo.processInfo.arguments.contains("--performance-log"),
+           let requestedAt = sessionStartRequestedAt {
+            let session = AVAudioSession.sharedInstance()
+            NSLog("%@", String(format: "SPACE_AUDIO entrance_schedule_ms=%.2f io_buffer_ms=%.2f route_latency_ms=%.2f",
+                                (ProcessInfo.processInfo.systemUptime - requestedAt) * 1_000,
+                                session.ioBufferDuration * 1_000, session.outputLatency * 1_000))
+        }
+#endif
+        if key == "sessionStart" { sessionStartRequestedAt = nil }
     }
 
     /// Ends a timed effect early when its matching visual is shortened (for
@@ -595,6 +670,7 @@ final class AppAudio: NSObject, ObservableObject {
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
         switch type {
         case .began:
+            pendingSessionStartDeadline = nil
             musicPlayer?.pause()
             // The system deactivates our session and stops the engine; mirror
             // that so `ended` can cleanly reactivate and bring the effects back.
@@ -621,6 +697,7 @@ final class AppAudio: NSObject, ObservableObject {
     }
 
     @objc private func appWillResignActive() {
+        pendingSessionStartDeadline = nil
         musicPlayer?.pause()
         sessionStartupToken += 1
         sessionOutputReady = false
